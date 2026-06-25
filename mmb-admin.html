@@ -320,7 +320,9 @@ auth.onAuthStateChanged(async user => {
   if(user){
     currentUid = user.uid;
     try {
-      const snap = await db.collection('users').doc(user.uid).get();
+      // Try both collection names
+    let snap = await db.collection('users').doc(user.uid).get();
+    if (!snap.exists) snap = await db.collection('user').doc(user.uid).get();
       currentRole = snap.exists ? (snap.data().role || 'owner') : 'owner';
     } catch(e){ currentRole = 'owner'; }
     document.getElementById('login').style.display = 'none';
