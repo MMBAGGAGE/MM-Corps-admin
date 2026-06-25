@@ -250,7 +250,7 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:var(--cream);mi
       <input type="file" id="kurir-files" accept="image/*" multiple onchange="previewFiles(this)" style="display:none">
     </div>
     <div class="photo-prev-grid" id="kurir-preview"></div>
-    <button class="btn btn-teal btn-block" onclick="uploadPhotos()">📤 Upload Foto Barang</button>
+    <button class="btn btn-teal btn-block" id="upload-btn" onclick="uploadPhotos()">📤 Upload Foto Barang</button>
 
     <div class="gold-line"></div>
     <div class="sec-ttl" style="font-size:13px">📦 Paket Tanpa Nama</div>
@@ -1114,6 +1114,8 @@ async function uploadPhotos(){
   if(!tripId){toast('Pilih trip dulu','err');return;}
   if(!owner){toast('Isi nama pemilik barang','err');return;}
   if(!kurirFiles.length){toast('Pilih foto dulu','err');return;}
+  const uploadBtn = document.getElementById('upload-btn');
+  if(uploadBtn){ uploadBtn.disabled=true; uploadBtn.textContent='⏳ Mengupload...'; }
   toast('Mengupload foto...','info');
   try{
     const photos=[];
@@ -1121,66 +1123,104 @@ async function uploadPhotos(){
       const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('Gagal'));r.readAsDataURL(file);});
       photos.push({url:b64,ownerName:owner,note,ts:Date.now(),uploadedBy:currentUid});
     }
-    const isUnknown=owner.toLowerCase()==='tanpa nama';
-    // Find the trip docId from cachedTrips (tripId is the custom TRIP-XXXX)
-    const tripObj=cachedTrips.find(t=>t.id===tripId);
-    const tripDocId=tripObj?.docId||tripId;
+    const isUnknown = owner.toLowerCase().trim() === 'tanpa nama';
+    // Find the trip docId from cachedTrips
+    const tripObj = cachedTrips.find(t => t.id === tripId);
+    const tripDocId = tripObj ? tripObj.docId : tripId;
+
     if(isUnknown){
-      const tripRef=db.collection('trips').doc(tripDocId);
-      const tripSnap=await tripRef.get();
-      const existing=tripSnap.data()?.unknownPhotos||[];
+      // Store as unknown/tanpa nama
+      const tripRef = db.collection('trips').doc(tripDocId);
+      const tripSnap = await tripRef.get();
+      const existing = tripSnap.exists ? (tripSnap.data().unknownPhotos||[]) : [];
       await tripRef.update({unknownPhotos:[...existing,...photos]});
-      toast('Foto tanpa nama tersimpan ✅','ok');
+      toast('📦 Foto tanpa nama tersimpan! Terlihat di bagian bawah halaman ini.','ok');
     }else{
-      const tripOrders=cachedOrders.filter(o=>o.tripId===tripId&&o.status!=='cancelled');
-      let matched=false;
+      // Try to match to an order - use flexible matching
+      const tripOrders = cachedOrders.filter(o => o.tripId === tripId && o.status !== 'cancelled');
+      let matched = false;
+      const ownerLow = owner.toLowerCase().trim();
+      const ownerWords = ownerLow.split(/\s+/);
+
       for(const o of tripOrders){
-        const nm=(o.rcvName||o.name||'').toLowerCase();
-        const ownerLow=owner.toLowerCase();
-        if(nm.includes(ownerLow.split(' ')[0])||ownerLow.includes(nm.split(' ')[0])){
-          const existing=o.photos||[];
+        // Match against receiver name or sender name
+        const rcvName = (o.rcvName || '').toLowerCase().trim();
+        const sndName = (o.name || '').toLowerCase().trim();
+        
+        // Check if any word matches
+        const nameMatch = ownerWords.some(word => 
+          word.length >= 3 && (rcvName.includes(word) || sndName.includes(word))
+        ) || rcvName.includes(ownerLow) || ownerLow.includes(rcvName.split(' ')[0]);
+
+        if(nameMatch && rcvName.length > 0){
+          const existing = o.photos || [];
+          const history = [...(o.history||[]), {
+            status: 'received', ts: Date.now(), 
+            note: 'Barang tiba di Jakarta, foto diupload kurir'
+          }];
           await db.collection('orders').doc(o.id).update({
-            photos:[...existing,...photos],
-            status:o.status==='pending'?'pending':'received',
-            history:[...(o.history||[]),{status:'received',ts:Date.now(),note:'Barang tiba di Jakarta, foto diupload kurir'}],
+            photos: [...existing, ...photos],
+            status: o.status === 'pending' ? 'received' : o.status,
+            history,
           });
-          matched=true;
-          toast('Foto terhubung ke order '+o.code+'! ✅','ok');
+          matched = true;
+          toast('✅ Foto berhasil dihubungkan ke order ' + (o.code||o.id) + '! Customer bisa lihat di tracking.', 'ok');
+          break; // Match pertama saja
         }
       }
+
       if(!matched){
-        const tripRef=db.collection('trips').doc(tripDocId);
-        const tripSnap=await tripRef.get();
-        const existing=tripSnap.data()?.pendingPhotos||[];
-        await tripRef.update({pendingPhotos:[...existing,...photos]});
-        toast('Foto tersimpan. Nama belum cocok dengan order manapun.','info');
+        // Store as pending - admin bisa link manual
+        const tripRef = db.collection('trips').doc(tripDocId);
+        const tripSnap = await tripRef.get();
+        const existing = tripSnap.exists ? (tripSnap.data().pendingPhotos||[]) : [];
+        // Store with owner name so it shows in unknown section
+        const labeledPhotos = photos.map(p => ({...p, ownerName: owner + ' (belum cocok)'}));
+        await tripRef.update({unknownPhotos:[...existing,...labeledPhotos]});
+        toast('⚠️ Foto tersimpan tapi nama "' + owner + '" belum cocok dengan order manapun di trip ini. Foto ada di bagian Paket Tanpa Nama.', 'info');
       }
     }
-    document.getElementById('kurir-owner').value='';
-    document.getElementById('kurir-note').value='';
-    document.getElementById('kurir-files').value='';
-    document.getElementById('kurir-preview').innerHTML='';
-    kurirFiles=[];
+
+    // Re-enable button
+    if(uploadBtn){ uploadBtn.disabled=false; uploadBtn.textContent='📤 Upload Foto Barang'; }
+    // Reset form
+    document.getElementById('kurir-owner').value = '';
+    document.getElementById('kurir-note').value = '';
+    document.getElementById('kurir-files').value = '';
+    document.getElementById('kurir-preview').innerHTML = '';
+    kurirFiles = [];
     renderUnknownPhotos();
-  }catch(e){toast('Gagal upload: '+e.message,'err');}
+  }catch(e){
+    if(uploadBtn){ uploadBtn.disabled=false; uploadBtn.textContent='📤 Upload Foto Barang'; }
+    toast('Gagal upload: '+e.message,'err');
+    console.error('Upload error:',e);
+  }
 }
 
 async function renderUnknownPhotos(){
   const el=document.getElementById('unknown-photos-wrap');if(!el)return;
-  await loadTrips();
-  const allUnknown=cachedTrips.flatMap(t=>(t.unknownPhotos||[]).map(p=>({...p,tripId:t.id})));
-  const allPending=cachedTrips.flatMap(t=>(t.pendingPhotos||[]).map(p=>({...p,tripId:t.id})));
-  const all=[...allUnknown,...allPending];
-  if(!all.length){el.innerHTML='<div class="empty">Tidak ada paket tanpa nama ✅</div>';return;}
-  el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${all.map(p=>`
-    <div style="background:var(--dark4);border-radius:10px;overflow:hidden;border:1px solid var(--border)">
-      <img src="${p.url}" style="width:100%;aspect-ratio:4/3;object-fit:cover">
-      <div style="padding:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--cream)">${p.ownerName}</div>
-        <div style="font-size:10px;color:var(--muted)">Trip: ${p.tripId}</div>
-        ${p.note?`<div style="font-size:10px;color:var(--muted)">${p.note}</div>`:''}
-      </div>
-    </div>`).join('')}</div>`;
+  const allPhotos=[];
+  cachedTrips.forEach(t=>{
+    (t.unknownPhotos||[]).forEach(p=>allPhotos.push({...p,tripId:t.id,tripDocId:t.docId||t.id}));
+  });
+  if(!allPhotos.length){el.innerHTML='<div class="empty">Tidak ada paket tanpa nama ✅</div>';return;}
+  el.innerHTML=`
+    <p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+      Foto di bawah belum terhubung ke order manapun. 
+      Hubungi customer yang bersangkutan via WA untuk mengklaim paketnya.
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${allPhotos.map((p,idx)=>`
+      <div style="background:var(--dark4);border-radius:10px;overflow:hidden;border:1px solid var(--border)">
+        <img src="${p.url}" style="width:100%;aspect-ratio:4/3;object-fit:cover" loading="lazy">
+        <div style="padding:8px">
+          <div style="font-size:11px;font-weight:700;color:var(--cream)">${p.ownerName||'Tanpa Nama'}</div>
+          <div style="font-size:10px;color:var(--muted)">Trip: ${p.tripId}</div>
+          ${p.note?`<div style="font-size:10px;color:var(--muted)">${p.note}</div>`:''}
+          <div style="font-size:10px;color:var(--muted)">${new Date(p.ts).toLocaleDateString('id-ID',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+      </div>`).join('')}
+    </div>`;
 }
 
 // ── REKAP ─────────────────────────────────────
