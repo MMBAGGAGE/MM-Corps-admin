@@ -221,10 +221,23 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:var(--cream);mi
       <div class="field"><label>Jakarta → Cairo</label><textarea id="dp-jkt" placeholder="Alamat drop point Jakarta..."></textarea></div>
       <button class="btn btn-teal btn-block" onclick="saveDropPoints()">💾 Simpan Alamat</button>
     </div>
-    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:16px">
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--gold3);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px">🔑 Ganti Password</div>
       <div class="field"><input type="password" id="s-pass" placeholder="Password baru (min 6 karakter)"></div>
       <button class="btn btn-teal btn-block" onclick="changePassword()">Ubah Password</button>
+    </div>
+
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--gold3);margin-bottom:12px;text-transform:uppercase;letter-spacing:1px">🗂️ Kelola Data & Foto</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">Hapus foto kurir yang sudah lebih dari 30 hari untuk menghemat storage Firestore.</p>
+      <button class="btn btn-teal btn-block" onclick="cleanOldPhotos()" style="font-family:'Inter',sans-serif;margin-bottom:8px">🗑️ Hapus Foto Order Selesai > 30 Hari</button>
+      <button class="btn btn-ghost btn-block" onclick="cleanAllDeliveredPhotos()" style="font-family:'Inter',sans-serif;margin-bottom:0">🗑️ Hapus Semua Foto Order Selesai</button>
+    </div>
+
+    <div style="background:var(--red-bg);border:1px solid rgba(192,57,43,.25);border-radius:12px;padding:16px">
+      <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">⚠️ Danger Zone</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">Hapus SEMUA data order dan trip. Tidak bisa dikembalikan. Gunakan hanya untuk reset total sistem.</p>
+      <button class="btn btn-red btn-block" onclick="resetAllData()" style="font-family:'Inter',sans-serif">🚨 Reset Semua Data</button>
     </div>
   </div>
 </div>
@@ -430,6 +443,7 @@ function orderCardHTML(o){
       ${o.status==='pending'?`<button class="btn btn-green" onclick="approveOrder('${o.id}')">✅ Approve</button><button class="btn btn-red" onclick="cancelOrder('${o.id}')">❌ Tolak</button>`:''}
       ${o.phone?`<button class="btn btn-wa" onclick="sendWA('${o.id}')">💬 WA</button>`:''}
       <button class="btn btn-ghost" onclick="openInvoiceModal('${o.id}')">🧾 Invoice</button>
+      <button class="btn btn-red" onclick="deleteOrder('${o.id}')">🗑️</button>
     </div>
   </div>`;
 }
@@ -794,6 +808,71 @@ async function changePassword(){
   if(!pass||pass.length<6){ toast('Password min 6 karakter','err'); return; }
   try { await auth.currentUser.updatePassword(pass); document.getElementById('s-pass').value=''; toast('Password diubah ✅','ok'); }
   catch(e){ toast('Gagal: '+e.message,'err'); }
+}
+
+// ── HAPUS FOTO LAMA ──────────────────────────
+async function cleanOldPhotos(){
+  if(!confirm('Hapus foto kurir dari order yang sudah SELESAI (> 30 hari)?')) return;
+  toast('Menghapus foto...','info');
+  const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  let count = 0;
+  try {
+    // Hanya hapus foto dari order yang status = delivered DAN foto > 30 hari
+    const ordersSnap = await db.collection('orders')
+      .where('status','==','delivered').get();
+    for(const doc of ordersSnap.docs){
+      const data = doc.data();
+      const photos = data.photos || [];
+      const filtered = photos.filter(p => p.ts > cutoff);
+      if(filtered.length !== photos.length){
+        await db.collection('orders').doc(doc.id).update({photos: filtered});
+        count++;
+      }
+    }
+    toast(`Selesai! Foto dihapus dari ${count} order yang sudah selesai ✅`,'ok');
+  } catch(e){ toast('Gagal: '+e.message,'err'); }
+}
+
+async function cleanAllDeliveredPhotos(){
+  if(!confirm('Hapus SEMUA foto dari order yang sudah SELESAI?')) return;
+  toast('Menghapus foto...','info');
+  let count = 0;
+  try {
+    const ordersSnap = await db.collection('orders')
+      .where('status','==','delivered').get();
+    for(const doc of ordersSnap.docs){
+      await db.collection('orders').doc(doc.id).update({photos: []});
+      count++;
+    }
+    toast(`Selesai! Foto dihapus dari ${count} order ✅`,'ok');
+  } catch(e){ toast('Gagal: '+e.message,'err'); }
+}
+
+// ── HAPUS SEMUA DATA (RESET) ──────────────────
+async function resetAllData(){
+  const confirm1 = confirm('⚠️ PERINGATAN! Ini akan menghapus SEMUA order, trip, dan foto. Lanjutkan?');
+  if(!confirm1) return;
+  const confirm2 = confirm('⚠️ YAKIN? Data yang dihapus TIDAK BISA dikembalikan!');
+  if(!confirm2) return;
+  toast('Menghapus semua data...','info');
+  try {
+    // Hapus semua orders
+    const ordersSnap = await db.collection('orders').get();
+    for(const doc of ordersSnap.docs) await db.collection('orders').doc(doc.id).delete();
+    // Hapus semua trips
+    const tripsSnap = await db.collection('trips').get();
+    for(const doc of tripsSnap.docs) await db.collection('trips').doc(doc.id).delete();
+    toast('Semua data berhasil dihapus ✅','ok');
+    cachedOrders = []; cachedTrips = [];
+    renderDashboard(); filterOrders();
+  } catch(e){ toast('Gagal: '+e.message,'err'); }
+}
+
+// ── HAPUS ORDER TERTENTU ──────────────────────
+async function deleteOrder(id){
+  if(!confirm('Hapus order ini permanen?')) return;
+  await db.collection('orders').doc(id).delete();
+  toast('Order dihapus','err');
 }
 </script>
 </body>
