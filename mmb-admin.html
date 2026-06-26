@@ -613,7 +613,7 @@ function updateBulkMin(i,v){
   if(!cachedSettings.bulkMin)cachedSettings.bulkMin={};
   cachedSettings.bulkMin[cachedSettings.cats[i].key]=parseFloat(v)||0;
 }
-async function toggleBulk(i){
+async async function toggleBulk(i){
   const key=cachedSettings.cats[i].key;
   if(!cachedSettings.bulkActive)cachedSettings.bulkActive={};
   cachedSettings.bulkActive[key]=!cachedSettings.bulkActive[key];
@@ -642,7 +642,7 @@ function addCat(){
   cachedSettings.rates[key]=150000;
   renderCatList();renderSlots();toast('Kategori ditambahkan!','ok');
 }
-async function saveCats(){
+async async function saveCats(){
   await saveSettings();
   toast('Kategori & harga disimpan! ✅','ok');
 }
