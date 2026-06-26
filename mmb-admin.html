@@ -832,9 +832,15 @@ function openOrderModal(id){
 async function setItemSt(orderId,i,status){
   const o=cachedOrders.find(x=>x.id===orderId);if(!o)return;
   const items=[...(o.items||[])];
-  items[i]={...items[i],status,adminNote:document.getElementById('in-'+i)?.value||''};
-  await db.collection('orders').doc(orderId).update({items});
-  toast(status==='approved'?'Barang disetujui ✅':'Barang ditolak','ok');
+  items[i]={...items[i],status,adminNote:document.getElementById('in-'+i)?.value||items[i].adminNote||''};
+  try{
+    await db.collection('orders').doc(orderId).update({items});
+    // Update local cache immediately so re-render shows new state
+    o.items=items;
+    toast(status==='approved'?'Barang disetujui ✅':'Barang ditolak ❌', status==='approved'?'ok':'err');
+    // Re-open modal to reflect change
+    if(typeof openOrderModal==='function') openOrderModal(orderId);
+  }catch(e){ toast('Gagal: '+e.message,'err'); }
 }
 
 async function saveOrder(id){
@@ -860,16 +866,29 @@ async function saveOrder(id){
 
 async function approveOrder(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
-  const history=[...(o.history||[]),{status:'received',ts:Date.now(),note:'Diapprove admin'}];
-  await db.collection('orders').doc(id).update({status:'received',history});
-  toast('Approved ✅','ok');sendWA(id,'received');
+  // Approve all items, but KEEP status pending (barang belum sampai Jakarta)
+  // Status 'received' hanya saat kurir upload foto (H-1)
+  const items=(o.items||[]).map(it=>({...it,status:it.status==='rejected'?'rejected':'approved'}));
+  const history=[...(o.history||[]),{status:'pending',ts:Date.now(),note:'Order disetujui admin, menunggu barang masuk gudang'}];
+  await db.collection('orders').doc(id).update({items,history});
+  toast('Order disetujui ✅ (status berubah ke "received" saat kurir upload foto H-1)','ok');
+  sendWA(id,'approved');
 }
 
 async function cancelOrder(id){
-  if(!confirm('Cancel order ini?'))return;
+  if(!confirm('Tolak / batalkan order ini? Semua barang akan ditandai DITOLAK.'))return;
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
-  await db.collection('orders').doc(id).update({status:'cancelled',history:[...(o.history||[]),{status:'cancelled',ts:Date.now()}]});
-  toast('Dibatalkan','err');
+  const reason=prompt('Alasan penolakan (opsional, akan dilihat customer):')||'';
+  // Mark ALL items as rejected so customer sees clear rejection
+  const items=(o.items||[]).map(it=>({...it,status:'rejected',adminNote:it.adminNote||reason||'Order ditolak admin'}));
+  await db.collection('orders').doc(id).update({
+    status:'cancelled',
+    items,
+    statusNote:reason?('Alasan: '+reason):'Order ditolak/dibatalkan admin',
+    history:[...(o.history||[]),{status:'cancelled',ts:Date.now(),note:reason||'Order ditolak admin'}]
+  });
+  toast('Order ditolak ❌','err');
+  if(typeof sendWA==='function') sendWA(id,'cancelled');
 }
 
 async function deleteOrder(id){
@@ -1108,6 +1127,34 @@ function previewFiles(input){
   }).join('');
 }
 
+// Compress image to ~800px JPEG so it fits Firestore 1MB doc limit
+function compressImg(file){
+  return new Promise(function(resolve,reject){
+    const reader=new FileReader();
+    reader.onload=function(e){
+      const img=new Image();
+      img.onload=function(){
+        let w=img.width,h=img.height;
+        const MAX=900;
+        if(w>h && w>MAX){ h=Math.round(h*MAX/w); w=MAX; }
+        else if(h>MAX){ w=Math.round(w*MAX/h); h=MAX; }
+        const canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0,w,h);
+        // Try decreasing quality until under ~700KB
+        let q=0.7, out=canvas.toDataURL('image/jpeg',q);
+        while(out.length>700000 && q>0.3){ q-=0.1; out=canvas.toDataURL('image/jpeg',q); }
+        resolve(out);
+      };
+      img.onerror=function(){ reject(new Error('Gambar tidak valid')); };
+      img.src=e.target.result;
+    };
+    reader.onerror=function(){ reject(new Error('Gagal baca file')); };
+    reader.readAsDataURL(file);
+  });
+}
+
 async function uploadPhotos(){
   const tripId=document.getElementById('kurir-trip').value;
   const owner=(document.getElementById('kurir-owner').value||'').trim();
@@ -1121,7 +1168,7 @@ async function uploadPhotos(){
   try{
     const photos=[];
     for(const file of kurirFiles){
-      const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('Gagal'));r.readAsDataURL(file);});
+      const b64=await compressImg(file);
       photos.push({url:b64,ownerName:owner,note,ts:Date.now(),uploadedBy:currentUid});
     }
     const isUnknown = owner.toLowerCase().trim() === 'tanpa nama';
