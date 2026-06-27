@@ -5,22 +5,29 @@
 <meta name="theme-color" content="#0A0A0A">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>M.M Corps — Admin Panel</title>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --gold:#C9A84C;--gold2:#F0D080;--gold3:#8B6914;--gold-dim:rgba(201,168,76,0.12);
-  --dark:#0A0A0A;--dark2:#111;--dark3:#1A1A1A;--dark4:#222;--dark5:#2A2A2A;
+  --dark:#070708;--dark2:#0D0D10;--dark3:#16161A;--dark4:#1F1F26;--dark5:#2A2A32;
   --cream:#F5F0E8;--cream3:#C8C0B0;
-  --teal:#0D6E6E;--teal2:#12908F;
+  --teal:#0D6E6E;--teal2:#15A39B;
   --green:#2D7A4F;--green-bg:rgba(45,122,79,0.1);
-  --red:#C0392B;--red-bg:rgba(192,57,43,0.1);
-  --border:rgba(201,168,76,0.15);--border2:rgba(255,255,255,0.06);--muted:#777;
+  --red:#D4504A;--red-bg:rgba(212,80,74,0.1);
+  --border:rgba(201,168,76,0.16);--border2:rgba(255,255,255,0.06);--muted:#7A7A86;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Monaco,'Courier New',monospace;
+  --shadow:0 12px 30px -12px rgba(0,0,0,.7);--rim:inset 0 1px 0 rgba(255,255,255,.04);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:'Inter',sans-serif;background:var(--dark);color:var(--cream);min-height:100vh;max-width:520px;margin:0 auto}
+/* offline-proof font remap: map former web fonts to system stacks */
+[style*="Playfair"],.login-brand,.tnav-brand,.login-btn,.ocard-name,.modal-title{font-family:var(--serif)!important}
+.stat-num,.ocard-code,.rate-inp{font-family:var(--mono)!important}
+body,.login-card input,.logout-btn,.tab,.search-wrap input,.fpill,.btn,.btn-block,.field input,.field select,.field textarea,.cat-name-inp,.type-btn{font-family:var(--sans)!important}
+body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-height:100vh;max-width:520px;margin:0 auto;-webkit-font-smoothing:antialiased;background-image:radial-gradient(120% 55% at 50% -6%,rgba(201,168,76,.09),transparent 60%),radial-gradient(90% 45% at 100% 100%,rgba(21,163,155,.06),transparent 60%);background-attachment:fixed}
 
 /* LOGIN */
 #login{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px}
@@ -170,7 +177,22 @@ body{font-family:'Inter',sans-serif;background:var(--dark);color:var(--cream);mi
 .toast.ok{background:linear-gradient(135deg,#0A2A16,#2D7A4F);color:#fff}
 .toast.err{background:linear-gradient(135deg,#2A0A0A,#C0392B);color:#fff}
 .toast.info{background:linear-gradient(135deg,var(--gold3),var(--gold));color:var(--dark)}
+/* === LUXE DEPTH LAYER (override, non-breaking) === */
+.login-card{background:linear-gradient(155deg,var(--dark3),var(--dark2));box-shadow:var(--shadow),var(--rim)}
+.login-logo img{filter:drop-shadow(0 6px 18px rgba(201,168,76,.25))}
+.login-brand{background:linear-gradient(120deg,var(--gold3),var(--gold2) 50%,var(--gold));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:3px}
+.login-btn{background:linear-gradient(135deg,#8B6914,#E6C868);box-shadow:0 8px 24px -8px rgba(201,168,76,.5)}
+.topnav{background:linear-gradient(180deg,rgba(20,18,12,.7),var(--dark2));box-shadow:0 1px 0 var(--border)}
+.tab.active{text-shadow:0 0 16px rgba(201,168,76,.35)}
+.stat-card{background:linear-gradient(150deg,var(--dark3),var(--dark2));box-shadow:var(--shadow),var(--rim)}
+.ocard{background:linear-gradient(150deg,var(--dark3),var(--dark2));box-shadow:var(--shadow),var(--rim)}
+.btn-gold{background:linear-gradient(135deg,#8B6914,#E6C868);box-shadow:0 6px 18px -8px rgba(201,168,76,.5)}
+.btn-teal{background:linear-gradient(135deg,var(--teal),var(--teal2))}
+.sec-card{background:linear-gradient(150deg,var(--dark3),var(--dark2));box-shadow:var(--rim)}
+.modal{background:linear-gradient(180deg,var(--dark3),var(--dark2));box-shadow:0 -20px 50px -12px rgba(0,0,0,.8)}
+.field input:focus,.field select:focus,.field textarea:focus,.login-card input:focus,.search-wrap input:focus{box-shadow:0 0 0 3px rgba(201,168,76,.12)}
 </style>
+
 </head>
 <body>
 
