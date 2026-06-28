@@ -1380,7 +1380,7 @@ function openOrderModal(id){
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <div class="field" style="margin:0"><label>Berat/Qty Aktual</label><input type="number" id="iq-${i}" value="${it.actQty??it.qty}" step="0.01" inputmode="decimal"></div>
-        <div class="field" style="margin:0"><label>Harga/${it.type||'kg'}</label><input type="number" id="ir-${i}" value="${it.actRate??it.rate??150000}" inputmode="numeric"></div>
+        <div class="field" style="margin:0"><label>Harga/${it.type||'kg'}${it.adminPriced?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ir-${i}" value="${it.actRate??it.rate??(it.adminPriced?'':150000)}" placeholder="${it.adminPriced?'Tentukan harga...':''}" inputmode="numeric"></div>
       </div>
       <div class="field" style="margin-bottom:8px"><label>Catatan Admin</label><input type="text" id="in-${i}" value="${it.adminNote||''}" placeholder="Alasan ditolak, info tambahan..."></div>
       <div style="display:flex;gap:6px">
@@ -1517,12 +1517,33 @@ function sendWA(id,overrideSt){
     received:'📦 Barang kamu sudah *tiba di Jakarta* dan siap untuk diberangkatkan ke Cairo!',
     transit:'✈️ Barang kamu sedang *dalam perjalanan ke Cairo* bersama kurir kami.',
     arrived:'🛬 Barang kamu sudah *tiba di Cairo*! Proses penyerahan sedang berlangsung.',
-    delivered:'🎉 Barang kamu sudah *selesai dikirim*!\\n\\n⭐ *Beri Penilaian Bintang & Saran*\\nBantu kami jadi lebih baik! Buka link di bawah, masukkan kode order, lalu beri bintang ⭐ + kritik & saran:\\n'+trackUrl+'\\n\\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇',
+    delivered:'🎉 Barang kamu sudah *selesai dikirim*!\n\n⭐ *Beri Penilaian Bintang & Saran*\nBantu kami jadi lebih baik! Buka link di bawah, masukkan kode order, lalu beri bintang ⭐ + kritik & saran:\n'+trackUrl+'\n\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇',
     cancelled:'Mohon maaf, order kamu *dibatalkan*. Silakan hubungi admin untuk info lebih lanjut.'
   };
   const phone=(o.phone||'').replace(/\D/g,'');
   const total=o.totalFinal||o.totalEst||0;
-  const msg=`Halo *${o.name}* 👋\n\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode     : *${o.code||o.id}*\n🗺️ Rute     : ${o.route}${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 Total    : ${fmtRp(total)}\n💳 Bayar    : ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${o.waGroupLink?'\n\n💬 Grup Trip: '+o.waGroupLink:''}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
+
+  // Rincian barang yang DISETUJUI + harga (dan barang ditolak, bila ada)
+  const its=o.items||[];
+  const approved=its.filter(it=>it.status==='approved');
+  const rejected=its.filter(it=>it.status==='rejected');
+  let rincian='';
+  if(approved.length){
+    rincian='\n\n✅ *BARANG DISETUJUI:*';
+    approved.forEach(it=>{
+      const q=it.actQty??it.qty, r=it.actRate??it.rate??0, sub=(parseFloat(q)||0)*(parseFloat(r)||0);
+      rincian+=`\n• ${it.cat}${it.desc?' ('+it.desc+')':''}: ${q} ${it.type||'kg'}${r?(' × '+fmtRp(r)+' = '+fmtRp(sub)):''}`;
+    });
+  }
+  if(rejected.length){
+    rincian+='\n\n❌ *BARANG TIDAK DISETUJUI:*';
+    rejected.forEach(it=>{ rincian+=`\n• ${it.cat}${it.desc?' ('+it.desc+')':''}${it.adminNote?' — '+it.adminNote:''}`; });
+  }
+
+  // Maklumat cek + tutorial cek status (selalu disertakan)
+  const maklumat='\n\n━━━━━━━━━━━━━━\n📌 *MOHON DICEK YA!*\nSilakan cek barang apa saja yang sudah *disetujui admin* & status terbaru pengiriman kamu di aplikasi:\n👉 '+trackUrl+'\n\n📖 *Cara cek status:*\n1️⃣ Buka link di atas\n2️⃣ Pilih menu *Cek Status & Foto Barang*\n3️⃣ Masukkan kode order kamu: *'+(o.code||o.id)+'*\n4️⃣ Lihat status, rincian barang & foto dari kurir';
+
+  const msg=`Halo *${o.name}* 👋\n\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode     : *${o.code||o.id}*\n🗺️ Rute     : ${o.route}${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 Total    : ${fmtRp(total)}\n💳 Bayar    : ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${o.waGroupLink?'\n\n💬 Grup Trip: '+o.waGroupLink:''}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
   window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
 }
 
@@ -1834,6 +1855,36 @@ function fillExpenseTripDropdown(){
   if(cur) sel.value=cur;
 }
 
+function saveCSVFile(csvText, filename){
+  // iOS Safari ignores <a download>; use Web Share with file when possible.
+  const blob=new Blob(['\uFEFF'+csvText],{type:'text/csv;charset=utf-8'});
+  const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isIOS && navigator.canShare){
+    try{
+      const file=new File([blob],filename,{type:'text/csv'});
+      if(navigator.canShare({files:[file]})){
+        navigator.share({files:[file],title:filename}).then(()=>{
+          toast('Pilih "Simpan ke File" ✅','ok');
+        }).catch(()=>{});
+        return;
+      }
+    }catch(e){}
+  }
+  try{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{try{document.body.removeChild(a);}catch(e){} URL.revokeObjectURL(url);},800);
+    toast('CSV diunduh ✅','ok');
+  }catch(e){
+    try{
+      const dataUri='data:text/csv;charset=utf-8,'+encodeURIComponent('\uFEFF'+csvText);
+      window.open(dataUri,'_blank');
+      toast('CSV dibuka di tab baru — simpan manual','info');
+    }catch(e2){ toast('Gagal export: '+e2.message,'err'); }
+  }
+}
 function exportPembukuanCSV(){
   let rows=[['Kurir','Trip','Tanggal','Rute','Revenue','Modal+Biaya','Komisi','Profit']];
   (cachedTrips||[]).forEach(t=>{
@@ -1844,13 +1895,9 @@ function exportPembukuanCSV(){
     const profit=rev-cost-comm;
     if(rev||cost||comm) rows.push([t.courier||'?',t.id,t.date||'',t.route||'',Math.round(rev),Math.round(cost),Math.round(comm),Math.round(profit)]);
   });
-  const csv=rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
-  const blob=new Blob([csv],{type:'text/csv'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='Pembukuan_MMBaggage_'+new Date().toISOString().slice(0,10)+'.csv';
-  document.body.appendChild(a); a.click(); setTimeout(()=>document.body.removeChild(a),500);
-  toast('CSV pembukuan diunduh ✅','ok');
+  if(rows.length<=1){ toast('Belum ada data pembukuan untuk diexport','info'); return; }
+  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  saveCSVFile(csv,'Pembukuan_MMBaggage_'+new Date().toISOString().slice(0,10)+'.csv');
 }
 
 // Ubah status SEMUA order di satu trip sekaligus
@@ -2279,10 +2326,7 @@ function exportCSV(){
     (o.items||[]).map(it=>`${it.cat}:${it.qty}${it.type||'kg'}`).join('; '),
   ]);
   const csv=[headers,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='MMBaggage_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
-  URL.revokeObjectURL(url);toast('CSV diexport! 📊','ok');
+  saveCSVFile(csv,'MMBaggage_'+new Date().toISOString().slice(0,10)+'.csv');
 }
 
 // ── FOTO CLEANUP ──────────────────────────────
