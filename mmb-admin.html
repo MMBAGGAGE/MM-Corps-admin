@@ -391,6 +391,12 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
         <option value="month">Bulan Ini</option>
         <option value="30">30 Hari Terakhir</option>
       </select></div>
+      <div class="field"><label>Tampilan Trip PP (Pulang-Pergi)</label>
+        <div style="display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;width:100%">
+          <button type="button" id="pp-gabung" onclick="setPPMode('gabung')" style="flex:1;padding:9px;font-size:11px;font-weight:700;border:none;cursor:pointer;background:var(--gold);color:var(--dark)">🔗 Gabung PP (1 sheet)</button>
+          <button type="button" id="pp-pisah" onclick="setPPMode('pisah')" style="flex:1;padding:9px;font-size:11px;font-weight:700;border:none;cursor:pointer;background:var(--dark3);color:var(--cream3)">↔️ Pisah per Arah</button>
+        </div>
+      </div>
       <div id="pembukuan-result"></div>
     </div>
   </div>
@@ -523,6 +529,11 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
       </select>
     </div>
     <div class="field"><label>Catatan</label><textarea id="t-note" placeholder="Info khusus trip ini..."></textarea></div>
+    <div class="field" style="background:rgba(201,168,76,.06);border:1px solid var(--border);border-radius:10px;padding:11px">
+      <label>🔗 Perjalanan PP (Pulang-Pergi)</label>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Jika trip ini bagian dari perjalanan bolak-balik (kurir sama, modal gabung), pilih trip pasangannya. Pembukuan bisa digabung jadi 1 sheet oleh owner.</div>
+      <select id="t-pairtrip"><option value="">— Trip 1 arah (tidak PP) —</option></select>
+    </div>
     <button class="btn btn-gold btn-block" onclick="saveTrip()">💾 Simpan Trip</button>
     <button class="btn btn-ghost btn-block" onclick="closeModal('modal-trip')">Batal</button>
   </div>
@@ -603,10 +614,11 @@ function playNotifSound(){
     });
   }catch(e){}
 }
-function notifyAdmin(nNew,nCancel,nAddon){
+function notifyAdmin(nNew,nCancel,nAddon,nCancelReq){
   let parts=[];
   if(nNew) parts.push('🆕 '+nNew+' order baru');
   if(nAddon) parts.push('➕ '+nAddon+' tambahan barang');
+  if(nCancelReq) parts.push('🚫 '+nCancelReq+' minta batal barang');
   if(nCancel) parts.push('❌ '+nCancel+' order dibatalkan');
   const msg=parts.join(' · ');
   playNotifSound();
@@ -626,17 +638,17 @@ function notifyAdmin(nNew,nCancel,nAddon){
 }
 function hideNotifBanner(){ const nb=document.getElementById('notif-banner'); if(nb) nb.style.transform='translateX(-50%) translateY(-100%)'; }
 function updateOrderBadge(){
-  // Hitung order yang butuh perhatian: status pending (belum diproses admin)
+  // Order butuh perhatian: pending + ada permintaan cancel
   const pending=(cachedOrders||[]).filter(o=>o.status==='pending').length;
-  _pendingNotif=pending;
-  // Update badge di tab Order
+  const cancelReq=(cachedOrders||[]).filter(o=>(o.items||[]).some(it=>it.status==='cancel_requested')).length;
+  const total=pending+cancelReq;
+  _pendingNotif=total;
   document.querySelectorAll('.tab').forEach(t=>{
-    if(t.textContent.replace(/\s*\(\d+\)\s*$/,'')==='Order' || t.getAttribute('data-tab')==='orders'){
-      t.innerHTML='Order'+(pending>0?' <span style="background:#D4504A;color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:10px;margin-left:2px">'+pending+'</span>':'');
+    if(t.textContent.replace(/\s*\(\d+\)\s*$/,'').replace(/\s*\d+\s*$/,'').trim()==='Order' || t.getAttribute('data-tab')==='orders'){
+      t.innerHTML='Order'+(total>0?' <span style="background:#D4504A;color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:10px;margin-left:2px">'+total+'</span>':'');
     }
   });
-  // Update favicon/title
-  try{ document.title=(pending>0?'('+pending+') ':'')+'M.M Corps — Admin'; }catch(e){}
+  try{ document.title=(total>0?'('+total+') ':'')+'M.M Corps — Admin'; }catch(e){}
 }
 
 function openModal(id){document.getElementById(id).classList.add('open')}
@@ -1172,7 +1184,7 @@ function loadData(){
     cachedOrders=snap.docs.map(d=>({id:d.id,...d.data()}));
     // === DETEKSI NOTIFIKASI: order baru / cancel / tambahan ===
     if(window._ordersReady){
-      let nNew=0,nCancel=0,nAddon=0;
+      let nNew=0,nCancel=0,nAddon=0,nCancelReq=0;
       cachedOrders.forEach(o=>{
         const prev=prevById[o.id];
         if(!prev){ if(o.status!=='cancelled') nNew++; }
@@ -1180,14 +1192,23 @@ function loadData(){
           if(prev.status!=='cancelled' && o.status==='cancelled') nCancel++;
           const pc=(prev.items||[]).length, nc=(o.items||[]).length;
           if(nc>pc) nAddon++;
+          // deteksi permintaan cancel baru (item berubah jadi cancel_requested)
+          const prevReq=(prev.items||[]).filter(x=>x.status==='cancel_requested').length;
+          const nowReq=(o.items||[]).filter(x=>x.status==='cancel_requested').length;
+          if(nowReq>prevReq) nCancelReq++;
         }
       });
-      if(nNew||nCancel||nAddon){ notifyAdmin(nNew,nCancel,nAddon); }
+      if(nNew||nCancel||nAddon||nCancelReq){ notifyAdmin(nNew,nCancel,nAddon,nCancelReq); }
     }
     window._ordersReady=true;
     updateOrderBadge();
-    renderDashboard();filterOrders();renderRekap();if(typeof renderKontakBanner==='function')renderKontakBanner();
-    if(document.getElementById('page-galeri')?.classList.contains('active')) renderGaleri();
+    // Hanya render halaman yang SEDANG AKTIF — hindari render berat semua halaman tiap aksi (sumber lag utama)
+    const active=document.querySelector('.page.active')?.id||'';
+    if(active==='page-dashboard') renderDashboard();
+    if(active==='page-orders') filterOrders();
+    if(active==='page-rekap') renderRekap();
+    if(active==='page-galeri') renderGaleri();
+    if(typeof renderKontakBanner==='function') renderKontakBanner();
   },e=>{console.warn('Orders:',e);});
   
   // Real-time listener untuk trips
@@ -1203,7 +1224,7 @@ function renderDashboard(){
   const pending=cachedOrders.filter(o=>o.status==='pending');
   const active=cachedOrders.filter(o=>!['delivered','cancelled','pending'].includes(o.status));
   const delivered=cachedOrders.filter(o=>o.status==='delivered');
-  const revenue=delivered.reduce((s,o)=>s+(o.totalFinal||o.totalEst||0),0);
+  const revenue=delivered.reduce((s,o)=>s+orderRevenue(o),0);
   document.getElementById('stat-grid').innerHTML=`
     <div class="stat-card"><div class="stat-num">${pending.length}</div><div class="stat-lbl">⏳ Pending</div></div>
     <div class="stat-card"><div class="stat-num">${active.length}</div><div class="stat-lbl">✈️ Aktif</div></div>
@@ -1252,6 +1273,7 @@ function orderCardHTML(o){
       </div>
       <span class="badge ${o.status||'pending'}">${ST_LABEL[o.status]||o.status}</span>
     </div>
+    ${(o.items||[]).some(it=>it.status==='cancel_requested')?`<div style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.35);border-radius:8px;padding:7px 10px;margin-bottom:8px;font-size:11px;font-weight:700;color:#D4504A">🚫 Customer minta batalkan ${(o.items||[]).filter(it=>it.status==='cancel_requested').length} barang — buka Kelola untuk approve/tolak</div>`:''}
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;font-size:11px">
       <div><span style="color:var(--muted)">Est: </span><span style="color:var(--gold);font-weight:700">${fmtRp(o.totalEst)}</span></div>
       <div><span style="color:var(--muted)">Final: </span><span style="font-weight:700">${o.totalFinal!=null?fmtRp(o.totalFinal):'-'}</span></div>
@@ -1471,7 +1493,7 @@ function openOrderModal(id){
           <span style="font-size:11px;color:var(--muted);margin-left:6px">${it.qty} ${it.type||'kg'}</span>
           ${it.desc?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${it.desc}</div>`:''}
         </div>
-        <span class="item-badge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:8px;background:${it.status==='approved'?'rgba(45,122,79,.15)':it.status==='rejected'?'var(--red-bg)':'rgba(212,160,23,.1)'};color:${it.status==='approved'?'#4CAF7D':it.status==='rejected'?'var(--red)':'#D4A017'}">${it.status==='approved'?'✅ Disetujui':it.status==='rejected'?'❌ Ditolak':'⏳ Pending'}</span>
+        <span class="item-badge" style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:8px;background:${it.status==='approved'?'rgba(45,122,79,.15)':it.status==='rejected'?'var(--red-bg)':it.status==='cancel_requested'?'rgba(212,80,74,.18)':'rgba(212,160,23,.1)'};color:${it.status==='approved'?'#4CAF7D':it.status==='rejected'?'var(--red)':it.status==='cancel_requested'?'#D4504A':'#D4A017'}">${it.status==='approved'?'✅ Disetujui':it.status==='rejected'?'❌ Ditolak':it.status==='cancel_requested'?'🚫 Minta Batal':'⏳ Pending'}</span>
       </div>
       ${it.adminByAdmin?`<div class="field" style="margin-bottom:8px"><label>Nama Barang (tambahan admin)</label><input type="text" id="id-${i}" value="${it.desc||''}" placeholder="Nama/deskripsi barang..."></div>`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
@@ -1488,8 +1510,9 @@ function openOrderModal(id){
       ${it.photo?`<div style="margin-bottom:8px"><div style="font-size:10px;color:#4A9FD4;font-weight:700;margin-bottom:4px">📸 Foto contoh dari customer:</div><img src="${it.photo}" onclick="window.open('${it.photo}','_blank')" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"></div>`:''}
       <div class="field" style="margin-bottom:8px"><label>Catatan Admin</label><input type="text" id="in-${i}" value="${it.adminNote||''}" placeholder="Alasan ditolak, info tambahan..."></div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-green" onclick="setItemSt('${id}',${i},'approved')">✅ Setujui Barang</button>
-        <button class="btn btn-red" onclick="setItemSt('${id}',${i},'rejected')">❌ Tolak Barang</button>
+        ${it.status==='cancel_requested'
+          ? `<button class="btn btn-red" onclick="setItemSt('${id}',${i},'rejected')">✅ Setujui Pembatalan</button><button class="btn btn-green" onclick="setItemSt('${id}',${i},'approved')">↩️ Tolak (barang tetap)</button>`
+          : `<button class="btn btn-green" onclick="setItemSt('${id}',${i},'approved')">✅ Setujui Barang</button><button class="btn btn-red" onclick="setItemSt('${id}',${i},'rejected')">❌ Tolak Barang</button>`}
       </div>
     </div>`).join('');
 
@@ -1761,9 +1784,16 @@ async function saveInvoice(){
   }));
   const cukai=parseFloat(document.getElementById('iv-cukai')?.value)||0;
   const total=invItems.reduce((s,it)=>s+it.qty*it.rate,0)+cukai;
+  // AUDIT ANTI-KORUPSI: bandingkan total invoice dgn revenue auto dari item approved
+  const autoRev=orderApprovedRevenue(o);
+  const isOverride=Math.abs(total-cukai-autoRev)>1; // beda dari auto (di luar cukai) = override
   await db.collection('orders').doc(o.id).update({
     invoiceItems:invItems.map(it=>({...it,total:it.qty*it.rate})),
     cukaiAmount:cukai,totalFinal:total,
+    totalFinalOverride:isOverride,
+    revenueAuto:autoRev,
+    revenueOverrideBy:isOverride?(currentUid||'admin'):null,
+    revenueOverrideAt:isOverride?Date.now():null,
     invoiceDate:new Date().toISOString().slice(0,10),
     invoiceNote:document.getElementById('iv-note')?.value||'',
     payStatus:'lunas',
@@ -1872,16 +1902,37 @@ async function deleteExpense(id){
 }
 
 // Hitung revenue 1 order dari berat AKTUAL (invoice) atau estimasi
+// Revenue AKTUAL: hanya item yang benar-benar disetujui (approved).
+// Item rejected / cancel_requested / cancelled TIDAK dihitung. Ini basis anti-korupsi.
+function itemIsBillable(it){ return it.status==='approved'; }
+function orderApprovedRevenue(o){
+  return (o.items||[]).filter(itemIsBillable).reduce(function(s,it){
+    var qty=(it.actQty!=null?it.actQty:it.qty)||0;
+    var rate=(it.actRate!=null?it.actRate:it.rate)||0;
+    return s + (parseFloat(qty)||0)*(parseFloat(rate)||0);
+  },0);
+}
 function orderRevenue(o){
-  if(o.totalFinal!=null && o.totalFinal!==undefined) return o.totalFinal;
-  if(o.invoiceItems && o.invoiceItems.length){
-    return o.invoiceItems.reduce((s,it)=>s+((parseFloat(it.qty)||0)*(parseFloat(it.rate)||0)),0);
-  }
-  return o.totalEst||0;
+  // Order yang dibatalkan penuh = 0 (tidak masuk laporan)
+  if(o.status==='cancelled') return 0;
+  var autoRev=orderApprovedRevenue(o);
+  // Jika admin override totalFinal, pakai itu TAPI selisih tercatat (lihat orderRevenueAudit)
+  if(o.totalFinal!=null && o.totalFinal!==undefined && o.totalFinalOverride===true) return o.totalFinal;
+  // Default: revenue aktual dari item approved
+  return autoRev;
+}
+// Audit: bandingkan angka auto vs angka yang dipakai — untuk transparansi ke owner
+function orderRevenueAudit(o){
+  var auto=orderApprovedRevenue(o);
+  var used=orderRevenue(o);
+  return {auto:auto, used:used, diff:used-auto, overridden:(o.totalFinalOverride===true)};
 }
 function orderKg(o){
-  if(o.invoiceItems && o.invoiceItems.length) return o.invoiceItems.reduce((s,it)=>s+(parseFloat(it.qty)||0),0);
-  return (o.items||[]).filter(it=>it.status!=='rejected').reduce((s,it)=>s+(parseFloat(it.qty)||0),0);
+  if(o.status==='cancelled') return 0;
+  return (o.items||[]).filter(itemIsBillable).reduce(function(s,it){
+    var qty=(it.actQty!=null?it.actQty:it.qty)||0;
+    return s+(parseFloat(qty)||0);
+  },0);
 }
 
 function periodFilter(ts, period){
@@ -1893,30 +1944,53 @@ function periodFilter(ts, period){
   return true;
 }
 
+let _ppMode='gabung';
+function setPPMode(m){
+  _ppMode=m;
+  const g=document.getElementById('pp-gabung'), p=document.getElementById('pp-pisah');
+  if(g&&p){
+    g.style.background=m==='gabung'?'var(--gold)':'var(--dark3)'; g.style.color=m==='gabung'?'var(--dark)':'var(--cream3)';
+    p.style.background=m==='pisah'?'var(--gold)':'var(--dark3)'; p.style.color=m==='pisah'?'var(--dark)':'var(--cream3)';
+  }
+  renderPembukuan();
+}
+// Peta tripId → label tampilan (gabung PP jadi 1 grup, atau pisah)
+function tripDisplayKey(tripId){
+  if(_ppMode==='pisah') return {key:tripId, label:tripId};
+  const t=(cachedTrips||[]).find(x=>x.id===tripId);
+  if(t&&t.groupId){
+    // gabungkan: cari semua trip segrup, buat label PP
+    const mates=(cachedTrips||[]).filter(x=>x.groupId===t.groupId).map(x=>x.id).sort();
+    return {key:'GRP-'+t.groupId, label:'🔗 PP: '+mates.join(' ↔ ')};
+  }
+  return {key:tripId, label:tripId};
+}
 function renderPembukuan(){
   const el=document.getElementById('pembukuan-result');
   if(!el) return;
   const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
 
-  // Group by courier → trip
+  // Group by courier → trip (dengan penggabungan PP jika mode gabung)
   const byCourier={};
   // Init from trips so kurir tanpa order tetap muncul
   (cachedTrips||[]).forEach(t=>{
     const c=t.courier||'Tanpa Kurir';
+    const dk=tripDisplayKey(t.id);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
-    if(!byCourier[c].trips[t.id]) byCourier[c].trips[t.id]={tripId:t.id, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
   });
 
-  // Orders → revenue + komisi affiliate (hanya delivered = sudah pasti, untuk audit akurat)
+  // Orders → revenue + komisi affiliate
   (cachedOrders||[]).forEach(o=>{
     if(o.status==='cancelled') return;
     if(!o.tripId) return;
     if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return;
     const trip=cachedTrips.find(t=>t.id===o.tripId);
     const c=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
+    const dk=tripDisplayKey(o.tripId);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
-    if(!byCourier[c].trips[o.tripId]) byCourier[c].trips[o.tripId]={tripId:o.tripId, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
-    const tr=byCourier[c].trips[o.tripId];
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
+    const tr=byCourier[c].trips[dk.key];
     const rev=orderRevenue(o);
     const kg=orderKg(o);
     tr.rev+=rev; tr.kg+=kg; tr.orders++;
@@ -1928,14 +2002,15 @@ function renderPembukuan(){
     }
   });
 
-  // Expenses → per trip
+  // Expenses → per trip (ikut penggabungan PP)
   (cachedExpenses||[]).forEach(ex=>{
     if(!periodFilter(ex.ts||Date.now(), period)) return;
     const c=ex.courier||'Tanpa Kurir';
+    const dk=ex.tripId?tripDisplayKey(ex.tripId):{key:ex.tripId||'-',label:ex.tripId||'-'};
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
-    if(!byCourier[c].trips[ex.tripId]) byCourier[c].trips[ex.tripId]={tripId:ex.tripId, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
-    byCourier[c].trips[ex.tripId].cost+=(ex.amount||0);
-    byCourier[c].trips[ex.tripId].expenses.push(ex);
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
+    byCourier[c].trips[dk.key].cost+=(ex.amount||0);
+    byCourier[c].trips[dk.key].expenses.push(ex);
   });
 
   // Compute totals
@@ -1949,6 +2024,28 @@ function renderPembukuan(){
   });
 
   const fmt=n=>'Rp'+Math.round(n).toLocaleString('id-ID');
+  // CATATAN PEMBATALAN (terpisah, TIDAK masuk total) — transparansi ke owner
+  const cancelledOrders=(cachedOrders||[]).filter(o=>{
+    if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return false;
+    return o.status==='cancelled' || (o.items||[]).some(it=>it.status==='rejected'||it.status==='cancel_requested');
+  });
+  let cancelH='';
+  if(cancelledOrders.length){
+    let nFullCancel=0, nItemCancel=0, nPending=0;
+    cancelledOrders.forEach(o=>{
+      if(o.status==='cancelled') nFullCancel++;
+      (o.items||[]).forEach(it=>{ if(it.status==='rejected') nItemCancel++; if(it.status==='cancel_requested') nPending++; });
+    });
+    cancelH=`<div style="background:rgba(212,80,74,.06);border:1px solid rgba(212,80,74,.25);border-radius:12px;padding:13px;margin-bottom:14px">
+      <div style="font-size:10px;color:#D4504A;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:700">🚫 Pembatalan (tidak masuk laporan keuangan)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12px">
+        <div><div style="color:var(--muted);font-size:10px">Order dibatal penuh</div><div style="font-weight:800;color:#D4504A">${nFullCancel}</div></div>
+        <div><div style="color:var(--muted);font-size:10px">Barang ditolak/batal</div><div style="font-weight:800;color:#D4504A">${nItemCancel}</div></div>
+        <div><div style="color:var(--muted);font-size:10px">Menunggu konfirmasi</div><div style="font-weight:800;color:#D4A017">${nPending}</div></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5">Data ini hanya catatan. Nilai barang yang dibatalkan <strong>tidak</strong> dihitung dalam revenue, profit, maupun komisi.</div>
+    </div>`;
+  }
   // GRAND SUMMARY
   let h=`<div style="background:linear-gradient(135deg,#1A1410,#0D0D0D);border:1.5px solid var(--gold);border-radius:13px;padding:16px;margin-bottom:14px">
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Ringkasan Total (Semua Kurir)</div>
@@ -1962,6 +2059,7 @@ function renderPembukuan(){
   </div>`;
 
   // PER KURIR
+  h+=cancelH;
   const couriers=Object.values(byCourier).filter(cd=>cd.orderCount>0 || Object.values(cd.trips).some(t=>t.expenses.length));
   if(!couriers.length){ el.innerHTML=h+'<div style="font-size:12px;color:var(--muted);text-align:center;padding:14px">Belum ada data transaksi pada periode ini</div>'; return; }
 
@@ -2160,12 +2258,24 @@ function openTripModal(docId){
     document.getElementById('t-route').value='Cairo → Jakarta';
     document.getElementById('t-status').value='open';
   }
+  // Isi dropdown pasangan PP (trip lain, kecuali diri sendiri)
+  const pairSel=document.getElementById('t-pairtrip');
+  if(pairSel){
+    const others=(cachedTrips||[]).filter(t=>t.docId!==docId);
+    pairSel.innerHTML='<option value="">— Trip 1 arah (tidak PP) —</option>'+others.map(t=>`<option value="${t.docId}">${t.id} · ${t.route} · ${fmtDate(t.date)}${t.courier?(' · '+t.courier):''}</option>`).join('');
+    // preselect kalau trip ini sudah punya pasangan segrup
+    if(docId){
+      const t=cachedTrips.find(x=>x.docId===docId);
+      if(t&&t.groupId){ const mate=others.find(o=>o.groupId===t.groupId); if(mate) pairSel.value=mate.docId; }
+    }
+  }
   openModal('modal-trip');
 }
 
 async function saveTrip(){
   const date=document.getElementById('t-date').value;
   if(!date){toast('Tanggal wajib diisi','err');return;}
+  const pairDocId=document.getElementById('t-pairtrip')?.value||'';
   const data={
     route:document.getElementById('t-route').value,date,
     arrive:document.getElementById('t-arrive').value,
@@ -2177,14 +2287,28 @@ async function saveTrip(){
     note:document.getElementById('t-note').value.trim(),
   };
   if(editTripId){
-    // editTripId is the docId
+    // Jika dipasangkan PP: buat/gunakan groupId bersama
+    if(pairDocId){
+      const pair=cachedTrips.find(t=>t.docId===pairDocId||t.id===pairDocId);
+      const gid=(pair&&pair.groupId)|| ('PP-'+Date.now().toString(36).toUpperCase());
+      data.groupId=gid;
+      if(pair&&pair.docId){ await db.collection('trips').doc(pair.docId).update({groupId:gid}); }
+    } else {
+      data.groupId=null; // lepas dari grup
+    }
     await db.collection('trips').doc(editTripId).update(data);
   }else{
     const ref=await db.collection('trips').add({...data,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
     const tripId='TRIP-'+ref.id.slice(-4).toUpperCase();
-    await ref.update({id:tripId});
+    const upd={id:tripId};
+    if(pairDocId){
+      const pair=cachedTrips.find(t=>t.docId===pairDocId||t.id===pairDocId);
+      const gid=(pair&&pair.groupId)|| ('PP-'+Date.now().toString(36).toUpperCase());
+      upd.groupId=gid;
+      if(pair&&pair.docId){ await db.collection('trips').doc(pair.docId).update({groupId:gid}); }
+    }
+    await ref.update(upd);
   }
-  // cachedTrips akan auto-update via listener
   closeModal('modal-trip');
   toast(editTripId?'Trip diupdate!':'Trip baru ditambahkan!','ok');
 }
@@ -2428,23 +2552,24 @@ async function renderUnknownPhotos(){
 // ── REKAP ─────────────────────────────────────
 async function renderRekap(){
   const el=document.getElementById('rekap-content');if(!el)return;
-  await loadTrips();
+  if(!cachedTrips||!cachedTrips.length) await loadTrips();
   const sel=document.getElementById('rekap-trip');
   if(sel) sel.innerHTML='<option value="all">Semua Trip</option>'+cachedTrips.map(t=>`<option value="${t.id}">${t.id} · ${t.route} · ${fmtDate(t.date)}</option>`).join('');
   const tf=sel?.value||'all';
   let orders=cachedOrders.filter(o=>o.status!=='cancelled');
   if(tf!=='all')orders=orders.filter(o=>o.tripId===tf);
   const delivered=orders.filter(o=>o.status==='delivered');
-  const totalRev=delivered.reduce((s,o)=>s+(o.totalFinal||o.totalEst||0),0);
-  const totalKg=delivered.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+(it.actQty||it.qty||0),0),0);
+  const totalRev=delivered.reduce((s,o)=>s+orderRevenue(o),0);
+  const totalKg=delivered.reduce((s,o)=>s+orderKg(o),0);
   const byTrip={};const byCat={};const byRoute={};
   delivered.forEach(o=>{
     const tid=o.tripId||'Manual';
     byTrip[tid]=byTrip[tid]||{count:0,rev:0,kg:0};
-    byTrip[tid].count++;byTrip[tid].rev+=(o.totalFinal||o.totalEst||0);
-    byTrip[tid].kg+=(o.items||[]).reduce((s,it)=>s+(it.actQty||it.qty||0),0);
-    byRoute[o.route]=(byRoute[o.route]||0)+(o.totalFinal||o.totalEst||0);
+    byTrip[tid].count++;byTrip[tid].rev+=orderRevenue(o);
+    byTrip[tid].kg+=orderKg(o);
+    byRoute[o.route]=(byRoute[o.route]||0)+orderRevenue(o);
     (o.items||[]).forEach(it=>{
+      if(!itemIsBillable(it)) return;
       byCat[it.cat]=byCat[it.cat]||{count:0,kg:0,rev:0};
       byCat[it.cat].count++;
       byCat[it.cat].kg+=(it.actQty||it.qty||0);
