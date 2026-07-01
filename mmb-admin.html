@@ -1627,14 +1627,20 @@ async function saveOrder(id){
   });
   const history=[...(o.history||[])];
   if(newSt!==o.status)history.push({status:newSt,ts:Date.now(),note:document.getElementById('m-note')?.value||''});
-  await db.collection('orders').doc(id).update({
+  const payload={
     status:newSt,
     payStatus:document.getElementById('m-pay').value,
     waGroupLink:document.getElementById('m-wa').value||'',
     statusNote:document.getElementById('m-note').value||'',
     items,history,
-  });
+  };
+  // OPTIMISTIC: update cache + tutup modal instan, simpan di belakang (anti-lag)
+  Object.assign(o,payload);
   closeModal('modal-order');toast('Order diupdate! ✅','ok');
+  updateOrderBadge();
+  const active=document.querySelector('.page.active')?.id||'';
+  if(active==='page-orders') filterOrders();
+  db.collection('orders').doc(id).update(payload).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
 }
 
 async function approveOrder(id){
@@ -1732,14 +1738,25 @@ function sendWA(id,overrideSt){
 function openInvoiceModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
-  const itemsHTML=(o.items||[]).map((it,i)=>`
-    <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:8px">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${it.cat} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${it.type||'kg'})</span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="field" style="margin:0"><label>Aktual ${it.type||'kg'}</label><input type="number" id="ivq-${i}" value="${it.actQty??it.qty}" step="0.01" oninput="calcInv()" inputmode="decimal"></div>
-        <div class="field" style="margin:0"><label>Harga/${it.type||'kg'}</label><input type="number" id="ivr-${i}" value="${it.actRate??it.rate??150000}" oninput="calcInv()" inputmode="numeric"></div>
+  const itemsHTML=(o.items||[]).filter(it=>it.status!=='rejected'&&it.status!=='cancel_requested').map((it,i)=>{
+    const realIdx=(o.items||[]).indexOf(it);
+    const unit=it.type||'kg';
+    return `
+    <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:8px" data-ividx="${realIdx}">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${it.cat}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <label style="font-size:11px;color:var(--muted)">Satuan:</label>
+        <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <button type="button" onclick="setInvUnit(${realIdx},'kg')" id="ivunit-kg-${realIdx}" style="padding:5px 12px;font-size:11px;font-weight:700;border:none;cursor:pointer;background:${unit==='kg'?'var(--gold)':'var(--dark3)'};color:${unit==='kg'?'var(--dark)':'var(--cream3)'}">KG</button>
+          <button type="button" onclick="setInvUnit(${realIdx},'pcs')" id="ivunit-pcs-${realIdx}" style="padding:5px 12px;font-size:11px;font-weight:700;border:none;cursor:pointer;background:${unit==='pcs'?'var(--gold)':'var(--dark3)'};color:${unit==='pcs'?'var(--dark)':'var(--cream3)'}">PCS</button>
+        </div>
       </div>
-    </div>`).join('');
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="field" style="margin:0"><label>Aktual <span id="ivunitlbl-${realIdx}">${unit}</span></label><input type="number" id="ivq-${realIdx}" value="${it.actQty??it.qty}" step="0.01" oninput="calcInv()" inputmode="decimal"></div>
+        <div class="field" style="margin:0"><label>Harga/<span id="ivunitlbl2-${realIdx}">${unit}</span></label><input type="number" id="ivr-${realIdx}" value="${it.actRate??it.rate??(it.adminPriced?'':150000)}" placeholder="${it.adminPriced?'wajib isi':''}" oninput="calcInv()" inputmode="numeric"></div>
+      </div>
+    </div>`;
+  }).join('');
 
   document.getElementById('invoice-form').innerHTML=`
     ${itemsHTML}
@@ -1760,12 +1777,27 @@ function openInvoiceModal(id){
   openModal('modal-invoice');
 }
 
+function setInvUnit(idx,unit){
+  const o=cachedOrders.find(x=>x.id===editOrderId);if(!o||!o.items||!o.items[idx])return;
+  o.items[idx].type=unit; // update di cache; disimpan saat saveInvoice
+  const kg=document.getElementById('ivunit-kg-'+idx), pcs=document.getElementById('ivunit-pcs-'+idx);
+  const l1=document.getElementById('ivunitlbl-'+idx), l2=document.getElementById('ivunitlbl2-'+idx);
+  if(kg&&pcs){
+    kg.style.background=unit==='kg'?'var(--gold)':'var(--dark3)'; kg.style.color=unit==='kg'?'var(--dark)':'var(--cream3)';
+    pcs.style.background=unit==='pcs'?'var(--gold)':'var(--dark3)'; pcs.style.color=unit==='pcs'?'var(--dark)':'var(--cream3)';
+  }
+  if(l1)l1.textContent=unit; if(l2)l2.textContent=unit;
+  calcInv();
+}
 function calcInv(){
   const o=cachedOrders.find(x=>x.id===editOrderId);if(!o)return;
   let total=0;const rows=[];
   (o.items||[]).forEach((it,i)=>{
-    const q=parseFloat(document.getElementById('ivq-'+i)?.value)||0;
-    const r=parseFloat(document.getElementById('ivr-'+i)?.value)||0;
+    if(it.status==='rejected'||it.status==='cancel_requested') return; // tidak masuk invoice
+    const qEl=document.getElementById('ivq-'+i), rEl=document.getElementById('ivr-'+i);
+    if(!qEl||!rEl) return;
+    const q=parseFloat(qEl.value)||0;
+    const r=parseFloat(rEl.value)||0;
     total+=q*r;
     rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">${it.cat} (${q} ${it.type||'kg'})</span><span style="font-weight:700">${fmtRp(q*r)}</span></div>`);
   });
@@ -1776,19 +1808,31 @@ function calcInv(){
 }
 
 async function saveInvoice(){
+  if(!guard('saveinv-'+editOrderId)) return;
   const o=cachedOrders.find(x=>x.id===editOrderId);if(!o)return;
-  const invItems=(o.items||[]).map((it,i)=>({
-    cat:it.cat,type:it.type||'kg',
-    qty:parseFloat(document.getElementById('ivq-'+i)?.value)||it.qty,
-    rate:parseFloat(document.getElementById('ivr-'+i)?.value)||0,
-  }));
+  // Simpan hanya item yang tampil (approved/pending), pakai index asli
+  const invItems=[];
+  const newItems=(o.items||[]).map((it,i)=>{
+    if(it.status==='rejected'||it.status==='cancel_requested') return it;
+    const qEl=document.getElementById('ivq-'+i), rEl=document.getElementById('ivr-'+i);
+    if(!qEl||!rEl) return it;
+    const q=parseFloat(qEl.value)||it.qty;
+    const r=parseFloat(rEl.value)||0;
+    invItems.push({cat:it.cat,desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
+    // update actual di item juga supaya konsisten dgn laporan
+    return {...it, actQty:q, actRate:r, type:it.type||'kg'};
+  });
   const cukai=parseFloat(document.getElementById('iv-cukai')?.value)||0;
   const total=invItems.reduce((s,it)=>s+it.qty*it.rate,0)+cukai;
-  // AUDIT ANTI-KORUPSI: bandingkan total invoice dgn revenue auto dari item approved
-  const autoRev=orderApprovedRevenue(o);
-  const isOverride=Math.abs(total-cukai-autoRev)>1; // beda dari auto (di luar cukai) = override
-  await db.collection('orders').doc(o.id).update({
-    invoiceItems:invItems.map(it=>({...it,total:it.qty*it.rate})),
+  // AUDIT ANTI-KORUPSI: revenue auto dihitung dari item aktual yang baru disimpan
+  const autoRev=newItems.filter(it=>it.status==='approved').reduce((s,it)=>s+((it.actQty!=null?it.actQty:it.qty)||0)*((it.actRate!=null?it.actRate:it.rate)||0),0);
+  const isOverride=Math.abs(total-cukai-autoRev)>1;
+  // OPTIMISTIC: tutup modal + update cache instan, simpan di belakang (anti-lag)
+  o.items=newItems; o.invoiceItems=invItems; o.cukaiAmount=cukai; o.totalFinal=total; o.payStatus='lunas';
+  closeModal('modal-invoice');toast('Invoice disimpan! 🧾','ok');
+  db.collection('orders').doc(o.id).update({
+    items:newItems,
+    invoiceItems:invItems,
     cukaiAmount:cukai,totalFinal:total,
     totalFinalOverride:isOverride,
     revenueAuto:autoRev,
@@ -1797,8 +1841,7 @@ async function saveInvoice(){
     invoiceDate:new Date().toISOString().slice(0,10),
     invoiceNote:document.getElementById('iv-note')?.value||'',
     payStatus:'lunas',
-  });
-  closeModal('modal-invoice');toast('Invoice disimpan! 🧾','ok');
+  }).catch(function(e){ toast('Gagal simpan invoice: '+e.message,'err'); });
   const lines=invItems.map(it=>`• ${it.cat} (${it.qty} ${it.type}): ${fmtRp(it.qty*it.rate)}`).join('\n');
   const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
   const fbUrl=trackUrl+'#feedback';
