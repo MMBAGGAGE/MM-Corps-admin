@@ -1445,7 +1445,7 @@ function simpanSemuaKontak(){
       const tel='+'+o.phone.replace(/\D/g,'');
       if(!seen[tel]){
         seen[tel]=1;
-        const fn='MMB '+(o.name||'Pemesan')+' ('+(o.code||'')+')';
+        const fn='MMB '+(o.name||'Pemesan');
         vcards.push(['BEGIN:VCARD','VERSION:3.0','FN:'+fn,'N:'+fn+';;;;','TEL;TYPE=CELL:'+tel,'ORG:M.M Baggage - Pemesan','END:VCARD'].join('\n'));
       }
     }
@@ -1454,7 +1454,7 @@ function simpanSemuaKontak(){
       const tel='+'+o.rcvPhone.replace(/\D/g,'');
       if(!seen[tel]){
         seen[tel]=1;
-        const fn='MMB '+(o.rcvName||'Penerima')+' ('+(o.code||'')+')';
+        const fn='MMB '+(o.rcvName||'Penerima');
         vcards.push(['BEGIN:VCARD','VERSION:3.0','FN:'+fn,'N:'+fn+';;;;','TEL;TYPE=CELL:'+tel,'ORG:M.M Baggage - Penerima Cairo','END:VCARD'].join('\n'));
       }
     }
@@ -1474,11 +1474,10 @@ function simpanSemuaKontak(){
 // Simpan kontak ke HP via vCard (.vcf) — otomatis muncul dialog simpan kontak di iPhone/Android
 function simpanKontak(nama, phone, code, tipe){
   if(!phone){ toast('Nomor tidak tersedia','err'); return; }
-  // Format nomor internasional (pastikan ada +)
   let tel = phone.replace(/\D/g,'');
   if(tel) tel = '+' + tel;
-  // Nama kontak: "MMB [tipe] [nama] [kode]" supaya mudah dicari
-  const fullName = 'MMB ' + nama + ' (' + (code||tipe) + ')';
+  // Nama kontak: cukup "MMB [nama]" tanpa kode resi supaya ringkas & mudah dicari
+  const fullName = 'MMB ' + nama;
   const vcard = [
     'BEGIN:VCARD',
     'VERSION:3.0',
@@ -1486,7 +1485,7 @@ function simpanKontak(nama, phone, code, tipe){
     'N:' + fullName + ';;;;',
     'TEL;TYPE=CELL:' + tel,
     'ORG:M.M Baggage - ' + tipe,
-    'NOTE:Order ' + (code||'') + ' - ' + tipe,
+    'NOTE:' + tipe,
     'END:VCARD'
   ].join('\n');
   try{
