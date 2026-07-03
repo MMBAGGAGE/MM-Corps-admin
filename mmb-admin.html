@@ -763,6 +763,8 @@ function buildTabs(){
   document.getElementById('tabs-bar').innerHTML=tabs.map((t,i)=>
     `<button class="tab${i===0?' active':''}" onclick="showPage('${t}')">${TAB_LABELS[t]}</button>`
   ).join('');
+  // Pastikan halaman pertama benar-benar ter-render (bukan hanya aktif secara visual)
+  if(tabs[0]) showPage(tabs[0]);
 }
 
 function showPage(id){
@@ -772,6 +774,7 @@ function showPage(id){
   if(pg) pg.classList.add('active');
   document.querySelectorAll('.tab').forEach(t=>{if(t.textContent.replace(/\s*\d+\s*$/,'').trim()===TAB_LABELS[id])t.classList.add('active');});
   if(typeof updateOrderBadge==='function') updateOrderBadge();
+  if(id==='orders') filterOrders();
   if(id==='trips'){ renderTrips(); }
   if(id==='rekap') renderRekap();
   if(id==='settings') renderSettings();
@@ -2228,10 +2231,23 @@ function renderPembukuan(){
       // Detail expenses
       if(tr.expenses.length){
         h+=`<div style="margin-top:6px;font-size:10px;color:var(--muted)">Rincian biaya:</div>`;
-        tr.expenses.forEach(ex=>{
-          const origLbl = ex.origCurrency==='EGP' ? ` <span style="color:#4A9FD4">(${(ex.origAmount||0).toLocaleString('id-ID')} EGP × ${ex.egpRate})</span>` : '';
-          const photoBtn = ex.photo ? `<button onclick="window.open('${ex.photo}','_blank')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷 Bukti</button>` : '';
-          h+=`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:3px 0"><span>• ${ex.note||ex.type} <span style="opacity:.6">(${ex.type})</span>${origLbl}</span><span style="display:flex;align-items:center;gap:6px"><span>${fmt(ex.amount)}</span>${photoBtn}<button onclick="deleteExpense('${ex.id}')" style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">🗑</button></span></div>`;
+        // Kelompokkan per arah (tripId asli) supaya jejak tidak hilang saat PP digabung
+        const byDir={};
+        tr.expenses.forEach(ex=>{ const k=ex.tripId||'-'; (byDir[k]=byDir[k]||[]).push(ex); });
+        const dirKeys=Object.keys(byDir);
+        const showDirHeader = dirKeys.length>1; // hanya tampilkan header arah kalau memang tergabung >1 trip
+        dirKeys.forEach(dirTripId=>{
+          if(showDirHeader){
+            const dt=(cachedTrips||[]).find(t=>t.id===dirTripId);
+            const dirLabel = dt ? (dt.route+' · '+dirTripId) : dirTripId;
+            const dirSum = byDir[dirTripId].reduce((s,e)=>s+(e.amount||0),0);
+            h+=`<div style="margin-top:5px;font-size:9px;font-weight:700;color:var(--gold3);text-transform:uppercase;letter-spacing:.5px;border-top:1px dashed var(--border);padding-top:4px">↪ ${dirLabel} · ${fmt(dirSum)}</div>`;
+          }
+          byDir[dirTripId].forEach(ex=>{
+            const origLbl = ex.origCurrency==='EGP' ? ` <span style="color:#4A9FD4">(${(ex.origAmount||0).toLocaleString('id-ID')} EGP × ${ex.egpRate})</span>` : '';
+            const photoBtn = ex.photo ? `<button onclick="window.open('${ex.photo}','_blank')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷 Bukti</button>` : '';
+            h+=`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:3px 0"><span>• ${ex.note||ex.type} <span style="opacity:.6">(${ex.type})</span>${origLbl}</span><span style="display:flex;align-items:center;gap:6px"><span>${fmt(ex.amount)}</span>${photoBtn}<button onclick="deleteExpense('${ex.id}')" style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">🗑</button></span></div>`;
+          });
         });
       }
       // Detail komisi affiliate
