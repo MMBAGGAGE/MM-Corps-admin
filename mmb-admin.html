@@ -1759,7 +1759,15 @@ function sendWA(id,overrideSt){
   // Maklumat cek + tutorial cek status (selalu disertakan)
   const maklumat='\n\n━━━━━━━━━━━━━━\n📌 *MOHON DICEK YA!*\nSilakan cek barang apa saja yang sudah *disetujui admin* & status terbaru pengiriman kamu di aplikasi:\n👉 '+trackUrl+'\n\n📖 *Cara cek status:*\n1️⃣ Buka link di atas\n2️⃣ Pilih menu *Cek Status & Foto Barang*\n3️⃣ Masukkan kode order kamu: *'+(o.code||o.id)+'*\n4️⃣ Lihat status, rincian barang & foto dari kurir';
 
-  const msg=`Halo *${o.name}* 👋\n\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode     : *${o.code||o.id}*\n🗺️ Rute     : ${o.route}${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 Total    : ${fmtRp(total)}\n💳 Bayar    : ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${o.waGroupLink?'\n\n💬 Grup Trip: '+o.waGroupLink:''}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  // Maklumat WAJIB masuk grup WA (dengan link langsung bila sudah di-set admin)
+  let grupWA='';
+  if(o.waGroupLink){
+    grupWA='\n\n━━━━━━━━━━━━━━\n🔔 *WAJIB GABUNG GRUP WHATSAPP TRIP*\nSemua info penting (jadwal, drop point, pengambilan barang) HANYA diumumkan di grup ini. Mohon *segera gabung* begitu terima pesan ini:\n👉 '+o.waGroupLink+'\n\nSetelah gabung, pantau juga status barangmu lewat menu *Cek Status* di aplikasi.';
+  } else {
+    grupWA='\n\n━━━━━━━━━━━━━━\n🔔 *WAJIB GABUNG GRUP WHATSAPP TRIP*\nLink grup akan kami kirimkan sesaat lagi. Mohon *segera gabung* saat linknya dibagikan — semua info penting diumumkan di sana, dan bisa juga dipantau lewat menu *Cek Status* di aplikasi.';
+  }
+
+  const msg=`Halo *${o.name}* 👋\n\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode     : *${o.code||o.id}*\n🗺️ Rute     : ${o.route}${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 Total    : ${fmtRp(total)}\n💳 Bayar    : ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${grupWA}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
   window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
 }
 
