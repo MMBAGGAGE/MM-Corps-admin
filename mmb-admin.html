@@ -1757,7 +1757,9 @@ function sendWA(id,overrideSt){
   }
 
   // Maklumat cek + tutorial cek status (selalu disertakan)
-  const maklumat='\n\n━━━━━━━━━━━━━━\n📌 *MOHON DICEK YA!*\nSilakan cek barang apa saja yang sudah *disetujui admin* & status terbaru pengiriman kamu di aplikasi:\n👉 '+trackUrl+'\n\n📖 *Cara cek status:*\n1️⃣ Buka link di atas\n2️⃣ Pilih menu *Cek Status & Foto Barang*\n3️⃣ Masukkan kode order kamu: *'+(o.code||o.id)+'*\n4️⃣ Lihat status, rincian barang & foto dari kurir';
+  const maklumat='\n\n━━━━━━━━━━━━━━\n📌 *MOHON DICEK YA!*\nSilakan cek barang apa saja yang sudah *disetujui admin* & status terbaru pengiriman kamu di aplikasi:\n👉 '+trackUrl+'\n\n📖 *Cara cek status:*\n1️⃣ Buka link di atas\n2️⃣ Pilih menu *Cek Status & Foto Barang*\n3️⃣ Masukkan kode order kamu: *'+(o.code||o.id)+'*\n4️⃣ Lihat status, rincian barang & foto dari kurir'
+    +'\n\n📍 *ALAMAT DROP POINT sudah tersedia di halaman Cek Status* (muncul setelah order disetujui). Buka kode ordermu di menu Cek Status, scroll ke bagian alamat untuk melihat lokasi & instruksi pengiriman barang.'
+    +'\n\n📸 *FOTO BARANG (H-1):* Satu hari sebelum keberangkatan, kurir akan memfoto barangmu sebagai bukti sudah diterima & siap berangkat. Foto ini *otomatis muncul* di halaman Cek Status.\n_Cara lihat foto:_\n1️⃣ Buka Cek Status → masukkan kode order\n2️⃣ Scroll ke bagian *Foto Barang dari Kurir*\n3️⃣ Foto akan tampil di sana pada H-1';
 
   // Ambil link grup: dari order, atau fallback dari trip yang di-set admin
   let groupLink = o.waGroupLink || '';
