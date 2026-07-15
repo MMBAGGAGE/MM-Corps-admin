@@ -1090,6 +1090,15 @@ function renderCatList(){
         </div>
       </div>
       <div style="margin-top:8px;margin-bottom:8px">
+        ${(c.type==='pcs')?`<div style="background:rgba(74,159,212,.07);border:1px solid rgba(74,159,212,.2);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+          <div style="font-size:10px;font-weight:700;color:#4A9FD4;letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px">⚖️ Berat per pcs (untuk hitung slot bagasi)</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            <span style="font-size:11px;color:var(--muted)">1 pcs =</span>
+            <input style="background:var(--dark3);border:1px solid var(--border);border-radius:7px;padding:5px 8px;font-size:12px;color:var(--cream);outline:none;width:70px;text-align:right;font-family:'Space Mono',monospace" type="number" step="0.01" value="${(cachedSettings.kgPerPcs||{})[c.key]||''}" onchange="updateKgPerPcs(${i},this.value)" inputmode="decimal" placeholder="1">
+            <span style="font-size:11px;color:var(--muted)">kg</span>
+          </div>
+          <div style="font-size:9px;color:var(--muted);margin-top:4px;line-height:1.4">Kosongkan = dianggap 1 kg per pcs. Isi agar sisa slot bagasi akurat.</div>
+        </div>`:''}
         <div style="font-size:10px;font-weight:700;color:var(--gold3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">🎁 Harga Borongan (opsional)</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <div style="display:flex;align-items:center;gap:4px">
@@ -1119,6 +1128,12 @@ function renderCatList(){
 }
 
 function updateCatLabel(i,v){cachedSettings.cats[i].label=v;}
+function updateKgPerPcs(i,v){
+  const key=cachedSettings.cats[i].key;
+  if(!cachedSettings.kgPerPcs) cachedSettings.kgPerPcs={};
+  const n=parseFloat(v)||0;
+  if(n>0) cachedSettings.kgPerPcs[key]=n; else delete cachedSettings.kgPerPcs[key];
+}
 function updateCatSub(i,v){cachedSettings.cats[i].sub=v;}
 function setCatType(i,t,btn){
   cachedSettings.cats[i].type=t;
@@ -1246,6 +1261,7 @@ function loadData(){
     }
     window._ordersReady=true;
     updateOrderBadge();
+    if(typeof syncTripCapacity==='function') syncTripCapacity();
     // Hanya render halaman yang SEDANG AKTIF — hindari render berat semua halaman tiap aksi (sumber lag utama)
     const active=document.querySelector('.page.active')?.id||'';
     if(active==='page-dashboard') renderDashboard();
@@ -2151,6 +2167,41 @@ function tripDisplayKey(tripId){
 const AN_MIN_TREND = 20;   // minimal order untuk bicara tren
 const AN_MIN_SEGMEN = 5;   // minimal item per segmen untuk ditampilkan persentasenya
 
+// ── KAPASITAS BAGASI (dipakai admin & jadi acuan customer) ──
+// Aturan: barang ditolak/minta-batal TIDAK memakan slot. Barang pcs dikonversi ke kg
+// pakai setting "berat per pcs"; kalau belum diisi admin, dianggap 1 kg/pcs.
+function itemBeratKg(it){
+  if(!it) return 0;
+  if(it.status==='rejected'||it.status==='cancel_requested') return 0; // tidak memakan slot
+  const q=parseFloat(it.actQty!=null?it.actQty:it.qty)||0;
+  const unit=it.type||'kg';
+  if(unit!=='pcs') return q;
+  const map=(cachedSettings&&cachedSettings.kgPerPcs)||{};
+  // cocokkan lewat key kategori; fallback 1 kg per pcs
+  let per=0;
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const cat=cats.find(c=>c.label===it.cat||c.key===it.cat);
+  if(cat && map[cat.key]>0) per=map[cat.key];
+  else if(map[it.cat]>0) per=map[it.cat];
+  return q*(per>0?per:1);
+}
+function tripUsedKg(tripId){
+  const orders=(cachedOrders||[]).filter(o=>o.tripId===tripId&&o.status!=='cancelled');
+  return orders.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+itemBeratKg(it),0),0);
+}
+// Tulis sisa slot ke dokumen trip supaya customer app bisa membacanya
+// TANPA perlu mengunduh data order customer lain (privasi terjaga).
+function syncTripCapacity(){
+  if(!cachedTrips||!cachedTrips.length) return;
+  cachedTrips.forEach(t=>{
+    if(!t.docId) return;
+    const used=Math.round(tripUsedKg(t.id)*10)/10;
+    // hanya tulis kalau berubah, supaya tidak boros write
+    if(Math.abs((t.usedKg||0)-used)<0.05) return;
+    t.usedKg=used; // update cache lokal dulu
+    db.collection('trips').doc(t.docId).update({usedKg:used}).catch(function(){});
+  });
+}
 function anNormPhone(p){ return String(p||'').replace(/\D/g,''); }
 function anCollect(period){
   const src=(cachedOrders||[]).filter(o=>{
@@ -2706,7 +2757,7 @@ function renderTrips(){
   el.innerHTML=cachedTrips.length?cachedTrips.map(t=>{
     const si=siMap[t.status]||siMap.open;
     const orders=cachedOrders.filter(o=>o.tripId===t.id&&o.status!=='cancelled');
-    const usedKg=orders.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+(it.actQty||it.qty||0),0),0);
+    const usedKg=tripUsedKg(t.id);
     const pct=t.capacity?Math.min(100,Math.round(usedKg/t.capacity*100)):0;
     const rev=orders.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.totalFinal||o.totalEst||0),0);
     return `<div class="trip-card">
