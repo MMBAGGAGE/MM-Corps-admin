@@ -433,6 +433,33 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
 
   <div id="page-settings" class="page">
 
+    <!-- SETUP AKUN & PERAN -->
+    <div class="sec-card" id="setup-akun-card" style="border-color:rgba(212,80,74,.35)">
+      <div class="sec-lbl" style="color:#D4504A">🔑 Akun &amp; Peran</div>
+      <div id="akun-status" style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px"></div>
+      <div style="background:var(--dark2);border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:8px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">UID akun yang sedang login</div>
+        <div id="akun-uid" style="font-family:var(--mono);font-size:12px;color:var(--gold);word-break:break-all">-</div>
+      </div>
+      <button class="btn btn-dark btn-block" onclick="salinUid()">📋 Salin UID</button>
+    </div>
+
+    <!-- BACKUP DATA -->
+    <div class="sec-card" style="border-color:rgba(76,175,125,.35)">
+      <div class="sec-lbl" style="color:#4CAF7D">💾 Backup Data</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Unduh <strong>seluruh data</strong> (order, trip, pembukuan, setting, referral, rating) jadi 1 file. Simpan di HP/laptop/Google Drive.<br><span style="color:#D4A017">⚠️ Lakukan rutin — kalau data hilang atau rusak, ini satu-satunya cara mengembalikannya.</span></div>
+      <div id="bak-status" style="font-size:12px;color:var(--muted);margin-bottom:10px">Belum ada backup di sesi ini.</div>
+      <button class="btn btn-gold btn-block" onclick="backupSemua()">💾 Backup Sekarang</button>
+      <details style="margin-top:10px">
+        <summary style="font-size:11px;color:var(--muted);cursor:pointer">🔄 Pulihkan dari backup (bahaya)</summary>
+        <div style="background:rgba(212,80,74,.07);border:1px solid rgba(212,80,74,.25);border-radius:9px;padding:10px;margin-top:8px">
+          <div style="font-size:11px;color:#D4504A;line-height:1.5;margin-bottom:8px">⚠️ Pemulihan <strong>menimpa</strong> data yang ada sekarang dan <strong>tidak bisa dibatalkan</strong>. Backup dulu sebelum memulihkan.</div>
+          <label style="display:block;background:var(--dark2);border:1px dashed var(--border);border-radius:8px;padding:11px;text-align:center;font-size:11px;color:var(--gold);cursor:pointer;margin-bottom:8px">📂 Pilih file backup (.json)<input type="file" accept=".json,application/json" onchange="pilihFileRestore(this)" style="display:none"></label>
+          <button class="btn btn-red btn-block" onclick="jalankanRestore()">🔄 Pulihkan</button>
+        </div>
+      </details>
+    </div>
+
     <!-- KEAMANAN: MIGRASI ORDER -->
     <div class="sec-card" style="border-color:rgba(212,80,74,.3)">
       <div class="sec-lbl" style="color:#D4504A">🔒 Keamanan Data</div>
@@ -744,11 +771,21 @@ function getDefaultSettings(){
 auth.onAuthStateChanged(async user=>{
   if(user){
     currentUid=user.uid;
+    window._userDocAda=false;
     try{
       let snap=await db.collection('users').doc(user.uid).get();
       if(!snap.exists) snap=await db.collection('user').doc(user.uid).get();
-      currentRole=snap.exists?(snap.data().role||'owner'):'owner';
-    }catch(e){currentRole='owner';}
+      if(snap.exists && snap.data().role){
+        currentRole=snap.data().role;
+        window._userDocAda=true;
+      } else {
+        // Dokumen peran tidak ada. JANGAN anggap owner.
+        // Tab tetap ditampilkan agar pemilik bisa melakukan setup,
+        // TAPI akses data sebenarnya tetap ditolak oleh Firestore Rules.
+        currentRole='owner';
+        window._userDocAda=false;
+      }
+    }catch(e){ currentRole='owner'; window._userDocAda=false; }
     document.getElementById('login').style.display='none';
     document.getElementById('app').style.display='flex';
     document.getElementById('role-label').textContent=currentRole.charAt(0).toUpperCase()+currentRole.slice(1);
@@ -801,7 +838,7 @@ function showPage(id){
   if(id==='orders') filterOrders();
   if(id==='trips'){ renderTrips(); }
   if(id==='rekap') renderRekap();
-  if(id==='settings') renderSettings();
+  if(id==='settings'){ renderSettings(); if(typeof renderAkun==='function') renderAkun(); }
   if(id==='pembukuan'){ fillExpenseTripDropdown(); renderPembukuan(); }
   if(id==='analisis') renderAnalisis();
   if(id==='kurir') initKurirPage();
@@ -2171,6 +2208,111 @@ function tripDisplayKey(tripId){
   }
   return {key:tripId, label:tripId};
 }
+// ═══ SETUP AKUN & PERAN ═══
+function renderAkun(){
+  const u=document.getElementById('akun-uid'); if(u) u.textContent=currentUid||'-';
+  const s=document.getElementById('akun-status'); if(!s) return;
+  if(window._userDocAda){
+    s.innerHTML='<span style="color:#4CAF7D">✅ Akun ini terdaftar dengan peran: <strong>'+currentRole+'</strong></span><br><span style="color:var(--muted)">Akses datamu dilindungi Firestore Rules.</span>';
+    const c=document.getElementById('setup-akun-card'); if(c) c.style.borderColor='rgba(76,175,125,.35)';
+  } else {
+    s.innerHTML='<span style="color:#D4504A">⚠️ Akun ini <strong>BELUM terdaftar</strong> di koleksi users.</span><br>'
+      +'<span style="color:var(--cream3)">Setelah Rules keamanan dipasang, akun tanpa pendaftaran <strong>tidak bisa mengakses data</strong>.<br><br>'
+      +'<strong>Cara mendaftarkan:</strong><br>'
+      +'1. Salin UID di bawah<br>'
+      +'2. Firebase Console → Firestore → koleksi <strong>users</strong><br>'
+      +'3. Buat dokumen, <strong>ID = UID</strong> tersebut<br>'
+      +'4. Tambah field <strong>role</strong> (string) = owner / admin / kurir<br>'
+      +'5. Ulangi untuk tiap akun, lalu login ulang</span>';
+  }
+}
+function salinUid(){
+  const t=currentUid||'';
+  if(!t){ toast('UID tidak tersedia','err'); return; }
+  try{
+    navigator.clipboard.writeText(t).then(()=>toast('UID disalin ✅','ok')).catch(()=>{
+      prompt('Salin UID ini:', t);
+    });
+  }catch(e){ prompt('Salin UID ini:', t); }
+}
+
+// ═══ BACKUP & PEMULIHAN DATA ═══
+// Melindungi dari: data terhapus tak sengaja, korupsi data, salah klik.
+// Ini perlindungan terpenting yang TIDAK ada hubungannya dengan hacker.
+const BACKUP_COLS = ['orders','trips','expenses','settings','referrals','ratings'];
+
+async function backupSemua(){
+  if(!guard('backup', 5000)) return;
+  const el=document.getElementById('bak-status');
+  const set=(t)=>{ if(el) el.innerHTML=t; };
+  set('<span style="color:var(--gold)">Mengunduh data... mohon tunggu</span>');
+  const hasil={ _meta:{ dibuat:new Date().toISOString(), versi:1, project:'mmcorps-aa67e' } };
+  let totalDoc=0;
+  try{
+    for(const col of BACKUP_COLS){
+      const snap=await db.collection(col).get();
+      hasil[col]=snap.docs.map(d=>({ _id:d.id, ...d.data() }));
+      totalDoc+=snap.docs.length;
+      set('<span style="color:var(--gold)">Mengunduh... '+col+' ('+snap.docs.length+' data)</span>');
+    }
+  }catch(e){
+    set('<span style="color:#D4504A">Gagal: '+e.message+'</span>');
+    toast('Backup gagal: '+e.message,'err'); return;
+  }
+  const json=JSON.stringify(hasil,null,1);
+  const mb=(json.length/1048576).toFixed(2);
+  const nama='BACKUP_MMBaggage_'+new Date().toISOString().slice(0,10)+'.json';
+  saveTextFile(json, nama, 'application/json');
+  set('<span style="color:#4CAF7D">✅ Backup selesai: '+totalDoc+' data · '+mb+' MB<br>File: '+nama+'</span>');
+}
+
+// PEMULIHAN — berbahaya, karena menimpa data yang ada.
+// Sengaja diberi pengaman berlapis: pilih file + ketik konfirmasi.
+function pilihFileRestore(input){
+  const f=input.files && input.files[0];
+  if(!f) return;
+  const el=document.getElementById('bak-status');
+  const rd=new FileReader();
+  rd.onload=function(e){
+    let data;
+    try{ data=JSON.parse(e.target.result); }
+    catch(err){ if(el) el.innerHTML='<span style="color:#D4504A">File rusak / bukan file backup.</span>'; return; }
+    if(!data._meta){ if(el) el.innerHTML='<span style="color:#D4504A">Bukan file backup M.M Baggage.</span>'; return; }
+    window._restoreData=data;
+    let ring='<div style="color:var(--cream3);line-height:1.6">File backup dibaca:<br>';
+    ring+='<span style="color:var(--muted)">Dibuat: '+(data._meta.dibuat||'?').slice(0,16).replace('T',' ')+'</span><br>';
+    BACKUP_COLS.forEach(c=>{ if(data[c]) ring+='• '+c+': <strong>'+data[c].length+'</strong> data<br>'; });
+    ring+='</div>';
+    if(el) el.innerHTML=ring;
+    toast('File backup siap. Tekan Pulihkan untuk lanjut.','info');
+  };
+  rd.readAsText(f);
+}
+async function jalankanRestore(){
+  const data=window._restoreData;
+  if(!data){ toast('Pilih file backup dulu','err'); return; }
+  if(!guard('restore', 5000)) return;
+  const jwb=prompt('⚠️ BAHAYA: Pemulihan akan MENIMPA data yang ada sekarang.\n\nData yang ada sekarang akan tertulis ulang dengan isi file backup. Tindakan ini TIDAK bisa dibatalkan.\n\nKetik: PULIHKAN');
+  if(jwb!=='PULIHKAN'){ toast('Dibatalkan','info'); return; }
+  const el=document.getElementById('bak-status');
+  const set=(t)=>{ if(el) el.innerHTML=t; };
+  let ok=0, gagal=0;
+  try{
+    for(const col of BACKUP_COLS){
+      const arr=data[col]; if(!Array.isArray(arr)) continue;
+      for(const doc of arr){
+        const id=doc._id; if(!id) { gagal++; continue; }
+        const isi={...doc}; delete isi._id;
+        try{ await db.collection(col).doc(id).set(isi); ok++; }
+        catch(e){ gagal++; }
+        if((ok+gagal)%10===0) set('<span style="color:var(--gold)">Memulihkan... '+ok+' data</span>');
+      }
+    }
+  }catch(e){ set('<span style="color:#D4504A">Gagal: '+e.message+'</span>'); return; }
+  set('<span style="color:#4CAF7D">✅ Pemulihan selesai: '+ok+' data'+(gagal?(' · '+gagal+' gagal'):'')+'</span>');
+  toast('Pemulihan selesai: '+ok+' data','ok');
+}
+
 // ═══ MIGRASI KEAMANAN: kode resi jadi document ID ═══
 // Tujuan: agar customer bisa GET order langsung lewat kodenya, sehingga izin
 // "list" (daftar semua order) bisa dicabut → data customer tidak bisa diunduh massal.
@@ -2703,6 +2845,32 @@ function fillExpenseTripDropdown(){
   const cur=sel.value;
   sel.innerHTML='<option value="">— Pilih Trip —</option>'+(cachedTrips||[]).map(t=>`<option value="${t.id}">${t.id} · ${t.courier||'?'} · ${t.route||''} ${t.date||''}</option>`).join('');
   if(cur) sel.value=cur;
+}
+
+// Simpan file teks apa pun (dipakai backup JSON). iOS Safari abaikan <a download>,
+// jadi pakai Share Sheet bila tersedia.
+function saveTextFile(text, filename, mime){
+  const blob=new Blob([text],{type:(mime||'text/plain')+';charset=utf-8'});
+  const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isIOS && navigator.canShare){
+    try{
+      const file=new File([blob],filename,{type:mime||'text/plain'});
+      if(navigator.canShare({files:[file]})){
+        navigator.share({files:[file],title:filename}).then(()=>{
+          toast('Pilih "Simpan ke File" ✅','ok');
+        }).catch(()=>{});
+        return;
+      }
+    }catch(e){}
+  }
+  try{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{try{document.body.removeChild(a);}catch(e){} URL.revokeObjectURL(url);},800);
+    toast('File diunduh ✅','ok');
+  }catch(e){ toast('Gagal simpan: '+e.message,'err'); }
 }
 
 function saveCSVFile(csvText, filename){
