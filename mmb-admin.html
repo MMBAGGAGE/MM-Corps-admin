@@ -433,6 +433,23 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
 
   <div id="page-settings" class="page">
 
+    <!-- BERSIHKAN ORDER SAMPAH -->
+    <div class="sec-card" style="border-color:rgba(212,160,23,.3)">
+      <div class="sec-lbl" style="color:#D4A017">🧹 Bersihkan Order Sampah</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Cari order berstatus <strong>Pending</strong> yang sudah lama tidak dikonfirmasi &mdash; biasanya order iseng/salah kirim. Order yang sudah disetujui, dikirim, atau selesai <strong>tidak akan tersentuh</strong>.</div>
+      <div class="field"><label>Pending lebih lama dari</label><select id="spam-hari">
+        <option value="7">7 hari</option>
+        <option value="14">14 hari</option>
+        <option value="30" selected>30 hari</option>
+        <option value="60">60 hari</option>
+      </select></div>
+      <div id="spam-status" style="font-size:12px;color:var(--muted);margin-bottom:10px">Tekan "Cek" untuk melihat.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-dark" onclick="cekSampah()">🔍 Cek</button>
+        <button class="btn btn-red" onclick="hapusSampah()">🗑 Hapus Terpilih</button>
+      </div>
+    </div>
+
     <!-- SETUP AKUN & PERAN -->
     <div class="sec-card" id="setup-akun-card" style="border-color:rgba(212,80,74,.35)">
       <div class="sec-lbl" style="color:#D4504A">🔑 Akun &amp; Peran</div>
@@ -903,34 +920,41 @@ function renderGaleri(){
   if(galFilter==='unknown') photos=photos.filter(p=>p.kind==='unknown');
   cnt.textContent=`Total ${total} foto · ${nMatched} tercocok · ${nUnknown} tanpa nama`;
   if(!photos.length){ grid.innerHTML='<div class="empty" style="text-align:center;padding:30px;color:var(--muted)">Tidak ada foto untuk filter ini.</div>'; return; }
+  window._galPhotos = photos;   // simpan di memori, jangan tempel base64 ke atribut onclick
   grid.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'+photos.map((p,i)=>{
     const tag = p.kind==='unknown'
       ? '<span style="background:rgba(212,80,74,.14);color:var(--red);font-size:8px;font-weight:700;padding:2px 6px;border-radius:5px">TANPA NAMA</span>'
       : '<span style="background:var(--gold-dim);color:var(--gold);font-size:8px;font-weight:700;padding:2px 6px;border-radius:5px">'+escHtml(p.code)+'</span>';
     const media = p.mediaType==='video'
       ? `<video src="${p.url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#000" controls playsinline></video>`
-      : `<img src="${p.url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" alt="" loading="lazy">`;
-    const fname=(p.kind==='unknown'?'tanpanama':p.code)+'-'+(i+1);
+      : `<img src="${p.url}" onclick="galBuka(${i})" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;cursor:pointer" alt="" loading="lazy">`;
     return `<div style="background:var(--dark3);border:1px solid var(--border2);border-radius:11px;overflow:hidden;box-shadow:var(--rim)">
       ${media}
       <div style="padding:8px 9px">
         <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:4px">${tag}</div>
         ${p.owner?`<div style="font-size:11px;font-weight:700;color:var(--cream)">${escHtml(p.owner)}</div>`:''}
         ${p.note?`<div style="font-size:9px;color:var(--muted);margin-top:1px;line-height:1.4">${escHtml(p.note)}</div>`:''}
-        <button class="btn btn-gold" style="width:100%;margin-top:7px;padding:7px;font-size:10px" onclick="dlGaleri('${encodeURIComponent(p.url)}','${escHtml(fname)}')">⬇ Unduh</button>
+        <button class="btn btn-gold" style="width:100%;margin-top:7px;padding:7px;font-size:10px" onclick="galSimpan(${i})">⬇ Simpan</button>
       </div>
     </div>`;
   }).join('')+'</div>';
 }
 function escHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function dlGaleri(encUrl, fname){
-  try{
-    const url=decodeURIComponent(encUrl);
-    const a=document.createElement('a');
-    a.href=url; a.download=(fname||'foto-mmbaggage')+'.jpg';
-    document.body.appendChild(a); a.click(); a.remove();
-    toast('Foto diunduh ✅','ok');
-  }catch(e){ toast('Gagal unduh: '+e.message,'err'); }
+function _galFoto(i){
+  const p = (window._galPhotos||[])[i];
+  if(!p || !p.url) return null;
+  const nama = (p.kind==='unknown' ? 'tanpanama' : (p.code||'foto')) + '-' + (i+1);
+  return {url:p.url, nama, isVideo:(p.mediaType==='video')};
+}
+function galBuka(i){
+  const f=_galFoto(i);
+  if(!f){ toast('Foto tidak ditemukan','err'); return; }
+  bukaFoto(f.url, f.nama, f.isVideo);
+}
+function galSimpan(i){
+  const f=_galFoto(i);
+  if(!f){ toast('Foto tidak ditemukan','err'); return; }
+  simpanFoto(f.url, f.nama);
 }
 
 // ── SETTINGS ──────────────────────────────────
@@ -1621,7 +1645,7 @@ function openOrderModal(id){
           <button type="button" onclick="setItemUnit(${i},'pcs')" id="unit-pcs-${i}" style="padding:6px 14px;font-size:11px;font-weight:700;border:none;cursor:pointer;background:${(it.type||'kg')==='pcs'?'var(--gold)':'var(--dark3)'};color:${(it.type||'kg')==='pcs'?'var(--dark)':'var(--cream3)'}">PCS</button>
         </div>
       </div>
-      ${it.photo?`<div style="margin-bottom:8px"><div style="font-size:10px;color:#4A9FD4;font-weight:700;margin-bottom:4px">📸 Foto contoh dari customer:</div><img src="${it.photo}" onclick="window.open('${it.photo}','_blank')" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"></div>`:''}
+      ${it.photo?`<div style="margin-bottom:8px"><div style="font-size:10px;color:#4A9FD4;font-weight:700;margin-bottom:4px">📸 Foto contoh dari customer (ketuk untuk lihat &amp; simpan):</div><img src="${it.photo}" onclick="bukaFotoItem('${id}',${i})" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"><button class="btn btn-dark" style="width:100%;margin-top:6px;padding:7px;font-size:11px" onclick="simpanFotoItem('${id}',${i})">⬇ Simpan Foto</button></div>`:''}
       <div class="field" style="margin-bottom:8px"><label>Catatan Admin</label><input type="text" id="in-${i}" value="${it.adminNote||''}" placeholder="Alasan ditolak, info tambahan..."></div>
       <div style="display:flex;gap:6px">
         ${it.status==='cancel_requested'
@@ -2214,6 +2238,150 @@ function tripDisplayKey(tripId){
   }
   return {key:tripId, label:tripId};
 }
+// ═══ SISTEM FOTO (lihat & simpan) ═══
+// Masalah lama: window.open('data:image/...') DIBLOKIR browser modern,
+// dan menempel base64 400KB ke atribut onclick membuat HTML membengkak + JS pecah.
+// Solusi: tampilkan di modal, simpan lewat Blob (+ Share Sheet di iOS).
+function dataUrlToBlob(dataUrl){
+  try{
+    const i = dataUrl.indexOf(',');
+    const head = dataUrl.slice(0, i);
+    const b64 = dataUrl.slice(i+1);
+    const m = head.match(/:(.*?);/);
+    const mime = m ? m[1] : 'image/jpeg';
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for(let k=0;k<bin.length;k++) u8[k] = bin.charCodeAt(k);
+    return new Blob([u8], {type:mime});
+  }catch(e){ return null; }
+}
+function simpanFoto(url, nama){
+  if(!url){ toast('Foto tidak tersedia','err'); return; }
+  let blob = null;
+  if(url.indexOf('data:')===0){ blob = dataUrlToBlob(url); }
+  if(!blob){
+    // bukan data URL (mis. link biasa) — buka saja
+    try{ window.open(url,'_blank'); }catch(e){ toast('Gagal buka foto','err'); }
+    return;
+  }
+  const isVid = blob.type.indexOf('video')>=0;
+  const fname = (nama||'foto-mmbaggage').replace(/[^A-Za-z0-9_-]/g,'_') + (isVid?'.mp4':'.jpg');
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  if(isIOS && navigator.canShare){
+    try{
+      const file = new File([blob], fname, {type:blob.type});
+      if(navigator.canShare({files:[file]})){
+        navigator.share({files:[file], title:fname}).then(()=>{
+          toast('Pilih "Simpan Gambar" ✅','ok');
+        }).catch(()=>{});
+        return;
+      }
+    }catch(e){}
+  }
+  try{
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = u; a.download = fname;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ try{document.body.removeChild(a);}catch(e){} URL.revokeObjectURL(u); }, 900);
+    toast('Foto disimpan ✅','ok');
+  }catch(e){ toast('Gagal simpan: '+e.message,'err'); }
+}
+// Penampil foto layar penuh (menggantikan window.open yang diblokir)
+let _fotoAktif = null;
+function bukaFoto(url, nama, isVideo){
+  if(!url){ toast('Foto tidak tersedia','err'); return; }
+  _fotoAktif = {url, nama};
+  let m = document.getElementById('foto-viewer');
+  if(!m){
+    m = document.createElement('div');
+    m.id = 'foto-viewer';
+    m.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.96);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:12px';
+    document.body.appendChild(m);
+  }
+  const media = isVideo
+    ? '<video src="'+url+'" controls playsinline autoplay style="max-width:100%;max-height:72vh;border-radius:10px;background:#000"></video>'
+    : '<img src="'+url+'" style="max-width:100%;max-height:72vh;object-fit:contain;border-radius:10px">';
+  m.innerHTML = media
+    + '<div style="font-size:12px;color:#C8C0B0;text-align:center;max-width:90%">'+(nama||'')+'</div>'
+    + '<div style="display:flex;gap:9px;width:100%;max-width:340px">'
+    + '<button onclick="simpanFotoAktif()" style="flex:1;background:linear-gradient(135deg,#8B6914,#E6C868);color:#070708;border:none;border-radius:11px;padding:13px;font-size:14px;font-weight:800;cursor:pointer">⬇ Simpan</button>'
+    + '<button onclick="tutupFoto()" style="flex:1;background:#1F1F26;color:#C8C0B0;border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:13px;font-size:14px;font-weight:700;cursor:pointer">Tutup</button>'
+    + '</div>';
+  m.style.display = 'flex';
+}
+function simpanFotoAktif(){ if(_fotoAktif) simpanFoto(_fotoAktif.url, _fotoAktif.nama); }
+function tutupFoto(){ const m=document.getElementById('foto-viewer'); if(m){ m.innerHTML=''; m.style.display='none'; } _fotoAktif=null; }
+
+// Foto contoh barang dari customer — diambil dari cache, bukan ditempel ke onclick
+function _fotoItem(orderId, i){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId);
+  const it=o&&o.items&&o.items[i];
+  if(!it||!it.photo) return null;
+  return {url:it.photo, nama:(o.code||o.id)+'-'+(it.cat||'barang')+'-'+(i+1)};
+}
+function bukaFotoItem(orderId, i){
+  const f=_fotoItem(orderId,i);
+  if(!f){ toast('Foto tidak ditemukan','err'); return; }
+  bukaFoto(f.url, f.nama, false);
+}
+function simpanFotoItem(orderId, i){
+  const f=_fotoItem(orderId,i);
+  if(!f){ toast('Foto tidak ditemukan','err'); return; }
+  simpanFoto(f.url, f.nama);
+}
+// Foto bukti pengeluaran
+function bukaFotoExpense(id){
+  const ex=(cachedExpenses||[]).find(e=>e.id===id);
+  if(!ex||!ex.photo){ toast('Foto tidak ditemukan','err'); return; }
+  bukaFoto(ex.photo, 'bukti-'+(ex.note||ex.type||id), false);
+}
+
+// ═══ BERSIHKAN ORDER SAMPAH ═══
+// HANYA menyentuh order berstatus 'pending' yang sudah lama.
+// Order approved/received/transit/arrived/delivered TIDAK PERNAH disentuh.
+function _cariSampah(){
+  const hari=parseInt(document.getElementById('spam-hari')?.value)||30;
+  const batas=Date.now()-(hari*864e5);
+  return (cachedOrders||[]).filter(o=>{
+    if(o.status!=='pending') return false;           // aman: hanya pending
+    const t=o.ts||o.createdAt;
+    const ms=(typeof t==='string')?Date.parse(t):t;
+    if(!ms||isNaN(ms)) return false;                 // tanpa tanggal: jangan sentuh
+    return ms<batas;
+  });
+}
+function cekSampah(){
+  const el=document.getElementById('spam-status'); if(!el) return;
+  const hari=document.getElementById('spam-hari')?.value||30;
+  const list=_cariSampah();
+  if(!list.length){ el.innerHTML='<span style="color:#4CAF7D">✅ Tidak ada order pending yang lebih lama dari '+hari+' hari.</span>'; return; }
+  let h='<div style="color:#D4A017;font-weight:700;margin-bottom:6px">Ditemukan '+list.length+' order pending &gt;'+hari+' hari:</div>';
+  list.slice(0,15).forEach(o=>{
+    const t=o.ts||o.createdAt; const d=t?new Date(typeof t==='string'?Date.parse(t):t):null;
+    h+='<div style="color:var(--muted);font-size:11px">• '+(o.code||o.id)+' — '+(o.name||'?')+(d?(' · '+d.toISOString().slice(0,10)):'')+'</div>';
+  });
+  if(list.length>15) h+='<div style="color:var(--muted);font-size:11px">…dan '+(list.length-15)+' lainnya</div>';
+  h+='<div style="color:var(--cream3);font-size:11px;margin-top:6px">Periksa dulu — kalau ada yang ternyata order asli, jangan dihapus.</div>';
+  el.innerHTML=h;
+}
+async function hapusSampah(){
+  if(!guard('hapussampah',5000)) return;
+  const list=_cariSampah();
+  if(!list.length){ toast('Tidak ada order sampah','info'); return; }
+  const jwb=prompt('⚠️ Akan menghapus '+list.length+' order PENDING yang lama.\n\nIni TIDAK bisa dibatalkan. Backup dulu kalau belum.\n\nKetik: HAPUS');
+  if(jwb!=='HAPUS'){ toast('Dibatalkan','info'); return; }
+  const el=document.getElementById('spam-status');
+  let ok=0, gagal=0;
+  for(const o of list){
+    try{ await db.collection('orders').doc(o.id).delete(); ok++; }
+    catch(e){ gagal++; }
+    if(el) el.innerHTML='<span style="color:var(--gold)">Menghapus... '+ok+'/'+list.length+'</span>';
+  }
+  toast('Selesai: '+ok+' dihapus'+(gagal?(', '+gagal+' gagal'):''), gagal?'err':'ok');
+  setTimeout(cekSampah,800);
+}
+
 // ═══ SETUP AKUN & PERAN ═══
 function renderAkun(){
   const u=document.getElementById('akun-uid'); if(u) u.textContent=currentUid||'-';
@@ -2829,7 +2997,7 @@ function renderPembukuan(){
           }
           byDir[dirTripId].forEach(ex=>{
             const origLbl = ex.origCurrency==='EGP' ? ` <span style="color:#4A9FD4">(${(ex.origAmount||0).toLocaleString('id-ID')} EGP × ${ex.egpRate})</span>` : '';
-            const photoBtn = ex.photo ? `<button onclick="window.open('${ex.photo}','_blank')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷 Bukti</button>` : '';
+            const photoBtn = ex.photo ? `<button onclick="bukaFotoExpense('${ex.id}')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷 Bukti</button>` : '';
             h+=`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:3px 0"><span>• ${ex.note||ex.type} <span style="opacity:.6">(${ex.type})</span>${origLbl}</span><span style="display:flex;align-items:center;gap:6px"><span>${fmt(ex.amount)}</span>${photoBtn}<button onclick="deleteExpense('${ex.id}')" style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">🗑</button></span></div>`;
           });
         });
