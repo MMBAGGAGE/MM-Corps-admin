@@ -773,8 +773,11 @@ auth.onAuthStateChanged(async user=>{
     currentUid=user.uid;
     window._userDocAda=false;
     try{
+      // Cek ketiga kemungkinan nama koleksi: users / user / User
+      // (Firestore membedakan huruf besar-kecil, dan data lama tersebar.)
       let snap=await db.collection('users').doc(user.uid).get();
       if(!snap.exists) snap=await db.collection('user').doc(user.uid).get();
+      if(!snap.exists) snap=await db.collection('User').doc(user.uid).get();
       if(snap.exists && snap.data().role){
         currentRole=snap.data().role;
         window._userDocAda=true;
