@@ -433,6 +433,17 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
 
   <div id="page-settings" class="page">
 
+    <!-- KEAMANAN: MIGRASI ORDER -->
+    <div class="sec-card" style="border-color:rgba(212,80,74,.3)">
+      <div class="sec-lbl" style="color:#D4504A">🔒 Keamanan Data</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Memindahkan order lama agar kode resi menjadi ID dokumen. Setelah semua order termigrasi, izin <strong>daftar semua order</strong> bisa dicabut dari customer &mdash; data customer tidak bisa diunduh massal oleh orang luar.</div>
+      <div id="mig-status" style="font-size:12px;color:var(--muted);margin-bottom:10px">Tekan "Cek" untuk melihat status.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-dark" onclick="cekMigrasi()">🔍 Cek</button>
+        <button class="btn btn-gold" onclick="jalankanMigrasi()">🚀 Jalankan Migrasi</button>
+      </div>
+    </div>
+
     <!-- KATEGORI & HARGA -->
     <div class="sec-card">
       <div class="sec-lbl">📦 Kategori Barang & Harga</div>
@@ -2160,8 +2171,49 @@ function tripDisplayKey(tripId){
   }
   return {key:tripId, label:tripId};
 }
-// ═══════════════════════════════════════════
-// ANALISIS BISNIS & MARKETING (owner only)
+// ═══ MIGRASI KEAMANAN: kode resi jadi document ID ═══
+// Tujuan: agar customer bisa GET order langsung lewat kodenya, sehingga izin
+// "list" (daftar semua order) bisa dicabut → data customer tidak bisa diunduh massal.
+function _perluMigrasi(){
+  return (cachedOrders||[]).filter(o=>o.code && o.id !== o.code);
+}
+function cekMigrasi(){
+  const el=document.getElementById('mig-status'); if(!el) return;
+  const total=(cachedOrders||[]).length;
+  const perlu=_perluMigrasi();
+  const tanpaKode=(cachedOrders||[]).filter(o=>!o.code);
+  if(!total){ el.innerHTML='<span style="color:var(--muted)">Belum ada order.</span>'; return; }
+  let h='';
+  h+=`<div>Total order: <strong style="color:var(--cream)">${total}</strong></div>`;
+  h+=`<div>Sudah aman (ID = kode): <strong style="color:#4CAF7D">${total-perlu.length-tanpaKode.length}</strong></div>`;
+  h+=`<div>Perlu dimigrasi: <strong style="color:${perlu.length?'#D4A017':'#4CAF7D'}">${perlu.length}</strong></div>`;
+  if(tanpaKode.length) h+=`<div style="color:#D4504A">Tanpa kode (tidak bisa dimigrasi): <strong>${tanpaKode.length}</strong></div>`;
+  if(!perlu.length && !tanpaKode.length) h+=`<div style="color:#4CAF7D;margin-top:6px">✅ Semua order sudah aman. Kamu bisa mengunci izin "list" di Firestore Rules.</div>`;
+  el.innerHTML=h;
+}
+async function jalankanMigrasi(){
+  if(!guard('migrasi',3000)) return;
+  const perlu=_perluMigrasi();
+  if(!perlu.length){ toast('Tidak ada order yang perlu dimigrasi ✅','ok'); cekMigrasi(); return; }
+  if(!confirm('Migrasi '+perlu.length+' order?\n\nOrder akan disalin ke ID baru (= kode resi), lalu salinan lama dihapus. Kode resi customer TIDAK berubah.')) return;
+  const el=document.getElementById('mig-status');
+  let ok=0, gagal=0;
+  for(const o of perlu){
+    try{
+      // cek dulu apakah dokumen tujuan sudah ada (hindari menimpa)
+      const tujuan=await db.collection('orders').doc(o.code).get();
+      if(tujuan.exists){ gagal++; continue; }
+      const data={...o}; delete data.id;          // jangan simpan field id
+      await db.collection('orders').doc(o.code).set(data);   // salin ke ID baru
+      await db.collection('orders').doc(o.id).delete();      // hapus yang lama
+      ok++;
+      if(el) el.innerHTML='Memproses... '+ok+'/'+perlu.length;
+    }catch(e){ gagal++; }
+  }
+  toast('Migrasi selesai: '+ok+' berhasil'+(gagal?(', '+gagal+' gagal'):''), gagal?'err':'ok');
+  setTimeout(cekMigrasi, 800);
+}
+
 // Prinsip: jangan tampilkan tren dari sampel kecil — itu noise, bukan pola.
 // ═══════════════════════════════════════════
 const AN_MIN_TREND = 20;   // minimal order untuk bicara tren
