@@ -768,7 +768,7 @@ const auth = firebase.auth();
 
 // ── HELPERS ───────────────────────────────────
 const fmtRp   = n => 'Rp ' + Number(n||0).toLocaleString('id-ID');
-const fmtDate = s => { try{return new Date(s+'T00:00:00').toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})}catch{return s||'-'} };
+const fmtDate = s => { try{ if(!s) return '-'; var d=new Date(s.indexOf('T')>=0? s : (s+'T00:00:00')); return isNaN(d.getTime())? (s||'-') : d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'}); }catch(e){return s||'-'} };
 function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type+' show';setTimeout(()=>{t.className='toast'},2800)}
 
 // === ANTI DOUBLE-CLICK GUARD ===
@@ -2397,6 +2397,13 @@ function setupEventListeners(){
   }catch(e){ console.warn(e); }
 }
 function initEventPage(){ renderEvents(); fillEventDropdown(); renderPeserta(); }
+// Cocokkan peserta ke event: via eventId, ATAU via judul (cadangan untuk entri lama tanpa eventId).
+function evEntryMatch(x, ev){
+  if(!ev) return false;
+  if(x && x.eventId && x.eventId===ev.id) return true;
+  if(x && (!x.eventId || x.eventId==='') && x.eventTitle && ev.title && x.eventTitle===ev.title) return true;
+  return false;
+}
 // Notif peserta baru — persisten (muncul walau app sempat ditutup), pola sama seperti order.
 function notifyPesertaBaru(entries){
   var seen; try{ seen=JSON.parse(localStorage.getItem('mmb_seen_entries')||'{}')||{}; }catch(e){ seen={}; }
@@ -2519,8 +2526,8 @@ function renderEvents(){
   const el=document.getElementById('event-list'); if(!el) return;
   if(!cachedEvents.length){ el.innerHTML='<div class="empty" style="padding:24px;text-align:center;color:var(--muted)">Belum ada event. Tekan "Event Baru".</div>'; return; }
   el.innerHTML=cachedEvents.map(e=>{
-    const n=(cachedEntries||[]).filter(x=>x.eventId===e.id).length;
-    const nP=(cachedEntries||[]).filter(x=>x.eventId===e.id&&x.status==='pending').length;
+    const n=(cachedEntries||[]).filter(x=>evEntryMatch(x,e)).length;
+    const nP=(cachedEntries||[]).filter(x=>evEntryMatch(x,e)&&x.status==='pending').length;
     return `<div class="sec-card" style="margin-bottom:8px">
       ${e.poster?`<img src="${e.poster}" style="width:100%;max-height:130px;object-fit:cover;border-radius:9px;margin-bottom:8px;display:block">`:''}
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
@@ -2633,7 +2640,8 @@ function openWinnerModal(id){
   document.getElementById('mw-name').value=e.winnerName||'';
   document.getElementById('mw-note').value=e.winnerNote||'';
   document.getElementById('mw-broadcast').innerHTML='';
-  var list=(cachedEntries||[]).filter(x=>x.eventId===id);
+  var _ev=(cachedEvents||[]).find(x=>x.id===id)||{id:id,title:e.title};
+  var list=(cachedEntries||[]).filter(x=>evEntryMatch(x,_ev));
   var box=document.getElementById('mw-peserta');
   box.innerHTML=list.length
     ? list.map(function(p){ return '<button type="button" class="btn btn-dark" style="width:100%;text-align:left;font-size:11px;padding:7px 9px;margin-bottom:4px" onclick="pilihWinner(\''+(p.name||'').replace(/\'/g,"\\'")+'\')">'+(p.name||'-')+' · +'+(p.phone||'')+'</button>'; }).join('')
@@ -2667,7 +2675,8 @@ function broadcastWinnerWA(){
   var e=cachedEvents.find(x=>x.id===_winnerEid)||{};
   if(!e.winnerAnnounced && !(document.getElementById('mw-name').value||'').trim()){ toast('Simpan pemenang dulu','err'); return; }
   if(!e.winnerName){ e.winnerName=(document.getElementById('mw-name').value||'').trim(); e.winnerNote=(document.getElementById('mw-note').value||'').trim(); }
-  var list=(cachedEntries||[]).filter(function(x){ return x.eventId===_winnerEid && x.phone; });
+  var _evb=(cachedEvents||[]).find(function(x){return x.id===_winnerEid;})||{id:_winnerEid,title:e.title};
+  var list=(cachedEntries||[]).filter(function(x){ return evEntryMatch(x,_evb) && x.phone; });
   var box=document.getElementById('mw-broadcast');
   if(!list.length){ box.innerHTML='<div style="font-size:11px;color:var(--muted)">Tidak ada peserta dengan nomor WA.</div>'; return; }
   box.innerHTML='<div style="font-size:11px;color:var(--muted);margin-bottom:6px">WhatsApp buka 1 chat per ketuk. Kirim ke tiap peserta:</div>'
@@ -2700,7 +2709,8 @@ async function saveEvent(){
 }
 async function hapusEvent(id){
   if(!guard('delevent')) return;
-  const n=(cachedEntries||[]).filter(x=>x.eventId===id).length;
+  const _evd=(cachedEvents||[]).find(x=>x.id===id)||{id:id};
+  const n=(cachedEntries||[]).filter(x=>evEntryMatch(x,_evd)).length;
   if(!confirm('Hapus event ini?'+(n?('\n\n⚠️ Ada '+n+' peserta. Data peserta TIDAK ikut terhapus, tapi eventnya hilang dari daftar.'):'')+'\n\nTidak bisa dibatalkan.')) return;
   try{ await db.collection('events').doc(id).delete(); toast('Event dihapus','ok'); }
   catch(e){ toast('Gagal: '+e.message,'err'); }
@@ -2717,7 +2727,8 @@ function renderPeserta(){
   const eid=document.getElementById('ev-filter-event')?.value||'';
   const cnt=document.getElementById('peserta-count');
   if(!eid){ el.innerHTML='<div class="empty" style="padding:20px;text-align:center;color:var(--muted)">Pilih event untuk melihat peserta.</div>'; if(cnt)cnt.textContent=''; return; }
-  let list=(cachedEntries||[]).filter(x=>x.eventId===eid);
+  const _evObj=(cachedEvents||[]).find(x=>x.id===eid)||{id:eid};
+  let list=(cachedEntries||[]).filter(x=>evEntryMatch(x,_evObj));
   const total=list.length;
   const nP=list.filter(x=>x.status==='pending').length;
   const nV=list.filter(x=>x.status==='verified').length;
@@ -2831,7 +2842,8 @@ function exportPesertaCSV(){
   const eid=document.getElementById('ev-filter-event')?.value||'';
   if(!eid){ toast('Pilih event dulu','err'); return; }
   const ev=cachedEvents.find(x=>x.id===eid);
-  const list=(cachedEntries||[]).filter(x=>x.eventId===eid);
+  const _eve=(cachedEvents||[]).find(x=>x.id===eid)||{id:eid};
+  const list=(cachedEntries||[]).filter(x=>evEntryMatch(x,_eve));
   if(!list.length){ toast('Belum ada peserta','info'); return; }
   const keys=(ev&&ev.fields||[]).filter(f=>f.type!=='photo').map(f=>f.key);
   const head=['Kode','Nama','No WA','Status','Catatan','Tanggal'].concat(keys.map(k=>{const f=(ev.fields||[]).find(x=>x.key===k);return f?f.label:k;}));
