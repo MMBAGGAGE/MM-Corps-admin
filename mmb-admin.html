@@ -771,6 +771,11 @@ firebase.initializeApp({
 });
 const db   = firebase.firestore();
 const auth = firebase.auth();
+// Simpan sesi login secara LOKAL: admin yang sudah pernah login TIDAK perlu
+// login lagi saat buka app berikutnya — langsung masuk tanpa ronde jaringan.
+try{ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
+// Prefill email terakhir supaya tidak perlu ketik ulang.
+try{ var _le=localStorage.getItem('mmb_last_email'); if(_le){ var _em=document.getElementById('l-email'); if(_em) _em.value=_le; } }catch(e){}
 
 // ── HELPERS ───────────────────────────────────
 const fmtRp   = n => 'Rp ' + Number(n||0).toLocaleString('id-ID');
@@ -916,6 +921,7 @@ function getDefaultSettings(){
 auth.onAuthStateChanged(async user=>{
   if(user){
     currentUid=user.uid;
+    try{ clearTimeout(window._loginSlow); }catch(e){}
     // ── POIN 1: LOGIN CEPAT ──────────────────────────────────
     // Tampilkan app SEGERA memakai role terakhir (cache). Verifikasi role
     // dilakukan di latar belakang tanpa memblokir UI. Ini AMAN karena
@@ -972,14 +978,19 @@ function doLogin(){
   const btn=document.getElementById('login-btn');
   errEl.textContent='';
   if(!email||!pass){errEl.textContent='Isi email dan password';return;}
+  try{ localStorage.setItem('mmb_last_email',email); }catch(e){}
   btn.textContent='Masuk...';btn.disabled=true;
+  // Kalau lebih dari 3 detik belum masuk, beri tahu (biasanya sinyal lemah).
+  clearTimeout(window._loginSlow);
+  window._loginSlow=setTimeout(function(){ if(btn.disabled){ errEl.style.color='#D4A017'; errEl.textContent='Koneksi lambat, masih memproses...'; } },3000);
   auth.signInWithEmailAndPassword(email,pass).catch(e=>{
+    clearTimeout(window._loginSlow);
     let msg='Login gagal';
     if(['auth/wrong-password','auth/invalid-credential','auth/invalid-login-credentials'].includes(e.code)) msg='Email atau password salah';
     else if(e.code==='auth/user-not-found') msg='Email tidak terdaftar';
     else if(e.code==='auth/network-request-failed') msg='Cek koneksi internet';
     else if(e.code==='auth/too-many-requests') msg='Terlalu banyak percobaan';
-    errEl.textContent=msg;
+    errEl.style.color=''; errEl.textContent=msg;
     btn.textContent='Masuk →';btn.disabled=false;
   });
 }
