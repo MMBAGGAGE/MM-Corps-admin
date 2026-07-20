@@ -3184,19 +3184,18 @@ const AN_MIN_TREND = 20;   // minimal order untuk bicara tren
 const AN_MIN_SEGMEN = 5;   // minimal item per segmen untuk ditampilkan persentasenya
 
 // ── KAPASITAS BAGASI (dipakai admin & jadi acuan customer) ──
-// ATURAN BAKU (sesuai instruksi owner): slot HANYA dihitung dari barang yang
-// SUDAH DI-APPROVE admin, memakai kg/qty AKTUAL admin (actQty). Barang yang
-// pending, ditolak, minta-batal, atau dibatalkan TIDAK memakan slot sama sekali.
-// Ini basis yang sama dengan penagihan (itemIsBillable) — jadi slot, invoice,
-// dan pembukuan selalu konsisten. Mencegah order batal/tolak menggelembungkan %.
+// ATURAN BAKU (sesuai instruksi owner): slot dihitung PER-BARANG yang di-approve admin.
+// Dalam satu order bisa ada barang yang sudah di-approve dan yang belum — hanya yang
+// berstatus 'approved' yang memakan slot. Barang pending/ditolak/minta-batal/dibatalkan
+// TIDAK dihitung, walau berada di order yang sudah disetujui.
+// Order yang dibatalkan seluruhnya (cancelled / cancelWholeOrder) dikeluarkan sebagai penjaga.
+// Pakai kg/qty AKTUAL admin (actQty) bila ada.
 function itemBeratKg(it){
-  if(!it) return 0;
-  if(it.status!=='approved') return 0;   // <-- kunci: hanya yang di-approve admin
+  if(!it || it.status!=='approved') return 0;   // KUNCI: hanya barang yg di-approve per item
   const q=parseFloat(it.actQty!=null?it.actQty:it.qty)||0;
   const unit=it.type||'kg';
   if(unit!=='pcs') return q;
   const map=(cachedSettings&&cachedSettings.kgPerPcs)||{};
-  // cocokkan lewat key kategori; fallback 1 kg per pcs
   let per=0;
   const cats=(cachedSettings&&cachedSettings.cats)||[];
   const cat=cats.find(c=>c.label===it.cat||c.key===it.cat);
@@ -3205,9 +3204,8 @@ function itemBeratKg(it){
   return q*(per>0?per:1);
 }
 function tripUsedKg(tripId){
-  // Order yang dibatalkan seluruhnya juga dikeluarkan (barangnya sudah rejected,
-  // tapi ini penjaga ganda supaya tidak ada sisa yang lolos).
-  const orders=(cachedOrders||[]).filter(o=>o.tripId===tripId && o.status!=='cancelled');
+  // Buang order yang dibatalkan seluruhnya; sisanya dihitung per-barang approved.
+  const orders=(cachedOrders||[]).filter(o=>o.tripId===tripId && o.status!=='cancelled' && !o.cancelWholeOrder);
   return orders.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+itemBeratKg(it),0),0);
 }
 // Tulis sisa slot ke dokumen trip supaya customer app bisa membacanya
