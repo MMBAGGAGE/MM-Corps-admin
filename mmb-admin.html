@@ -271,7 +271,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v3 · realtime</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v5 · pembukuan</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1507,6 +1507,7 @@ function loadData(){
   if(typeof loadSavedContacts==='function') loadSavedContacts();
   // Listener pengeluaran (pembukuan)
   if(typeof setupExpensesListener==='function') setupExpensesListener();
+  if(typeof setupPaymentsListener==='function') setupPaymentsListener();
   if(typeof setupEventListeners==='function') setupEventListeners();
   if(typeof startAutoRefresh==='function') startAutoRefresh();
   if(typeof _fetchEntries==='function') _fetchEntries(true);   // tarik peserta segera
@@ -1570,7 +1571,7 @@ function orderCardHTML(o){
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;font-size:11px">
       <div><span style="color:var(--muted)">Est: </span><span style="color:var(--gold);font-weight:700">${fmtRp(o.totalEst)}</span></div>
       <div><span style="color:var(--muted)">Final: </span><span style="font-weight:700">${o.totalFinal!=null?fmtRp(o.totalFinal):'-'}</span></div>
-      <div><span style="color:var(--muted)">Bayar: </span><span style="font-weight:700">${o.payStatus==='lunas'?'✅':o.payStatus==='dp'?'🔶':'⏳'}</span></div>
+      <div><span style="color:var(--muted)">Bayar: </span><span style="font-weight:700">${o.payStatus==='lunas'?('✅'+(orderPayment(o.id)?' 📷':'')):o.payStatus==='dp'?'🔶':'⏳'}</span></div>
     </div>
     <div class="ocard-actions">
       <button class="btn btn-ghost" onclick="openOrderModal('${o.id}')">✏️ Kelola</button>
@@ -1767,6 +1768,7 @@ function simpanKontak(nama, phone, code, tipe){
 function openOrderModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
+  _payProofStaged=null;
   const ST=[
     {k:'pending',l:'📝 Pesanan Masuk'},
     {k:'approved',l:'✅ Order Disetujui Admin'},
@@ -1839,6 +1841,7 @@ function openOrderModal(id){
         <option value="lunas"${o.payStatus==='lunas'?' selected':''}>✅ Lunas</option>
       </select>
     </div>
+    ${paymentSectionHTML(o)}
     <div class="field"><label>Link Grup WA Trip</label><input type="url" id="m-wa" value="${o.waGroupLink||''}" placeholder="https://chat.whatsapp.com/..."></div>
     <div class="field"><label>Catatan untuk Customer</label><input type="text" id="m-note" value="${o.statusNote||''}" placeholder="Info status terbaru..."></div>
     <button class="btn btn-gold btn-block" onclick="saveOrder('${id}')">💾 Simpan Update</button>
@@ -2147,7 +2150,7 @@ async function saveInvoice(){
   const autoRev=newItems.filter(it=>it.status==='approved').reduce((s,it)=>s+((it.actQty!=null?it.actQty:it.qty)||0)*((it.actRate!=null?it.actRate:it.rate)||0),0);
   const isOverride=Math.abs(total-cukai-autoRev)>1;
   // OPTIMISTIC: tutup modal + update cache instan, simpan di belakang (anti-lag)
-  o.items=newItems; o.invoiceItems=invItems; o.cukaiAmount=cukai; o.totalFinal=total; o.payStatus='lunas';
+  o.items=newItems; o.invoiceItems=invItems; o.cukaiAmount=cukai; o.totalFinal=total;
   closeModal('modal-invoice');toast('Invoice disimpan! 🧾','ok');
   db.collection('orders').doc(o.id).update({
     items:newItems,
@@ -2159,26 +2162,44 @@ async function saveInvoice(){
     revenueOverrideAt:isOverride?Date.now():null,
     invoiceDate:new Date().toISOString().slice(0,10),
     invoiceNote:document.getElementById('iv-note')?.value||'',
-    payStatus:'lunas',
   }).catch(function(e){ toast('Gagal simpan invoice: '+e.message,'err'); });
   const lines=invItems.map(it=>`• ${it.cat} (${it.qty} ${it.type}): ${fmtRp(it.qty*it.rate)}`).join('\n');
   const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
   const fbUrl=trackUrl+'#feedback';
   const msg=`Halo *${o.name}* 👋\n\n*INVOICE RESMI M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode  : *${o.code||o.id}*\n📅 Tgl    : ${new Date().toLocaleDateString('id-ID')}\n━━━━━━━━━━━━━━\n${lines}${cukai?'\n• Cukai/Pajak : '+fmtRp(cukai):''}\n━━━━━━━━━━━━━━\n💰 *TOTAL: ${fmtRp(total)}*\n\nMohon lakukan pembayaran sesuai total di atas 🙏\n\n✨ _Kepercayaan Anda adalah prioritas kami._ Kami berkomitmen menghadirkan layanan pengiriman bagasi Cairo–Jakarta yang *aman, cepat, dan transparan* untuk Anda.\n\n⭐ *Bagaimana pengalaman Anda bersama kami?*\nLuangkan 30 detik untuk beri bintang, kesan, & saran di:\n👉 ${fbUrl}\n\nMasukan Anda membantu M.M Baggage terus berkembang & melayani lebih baik. 🌟\n━━━━━━━━━━━━━━\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇\n_M.M Baggage — Cairo ↔ Jakarta_`;
-  // Kirim ke pemesan DAN penerima Cairo (jika ada & berbeda)
-  const phones=[];
-  const sender=(o.phone||'').replace(/\D/g,''); if(sender) phones.push(sender);
-  const rcv=(o.rcvPhone||'').replace(/\D/g,''); if(rcv && rcv!==sender) phones.push(rcv);
-  if(!phones.length){ toast('Nomor WA tidak tersedia','err'); return; }
-  // Buka WA untuk pemesan dulu; jika ada penerima beda, beri tahu admin
-  window.open('https://wa.me/'+phones[0]+'?text='+encodeURIComponent(msg),'_blank');
-  if(phones.length>1){
-    setTimeout(function(){
-      if(confirm('Kirim invoice juga ke penerima Cairo ('+phones[1]+')?')){
-        window.open('https://wa.me/'+phones[1]+'?text='+encodeURIComponent(msg),'_blank');
-      }
-    }, 1200);
-  }
+  // Simpan pesan + tujuan, lalu tampilkan pemilih tujuan (fleksibel: pengirim / penerima / keduanya)
+  const sender=(o.phone||'').replace(/\D/g,'');
+  const rcv=(o.rcvPhone||'').replace(/\D/g,'');
+  _pendingInvoice={ id:o.id, msg, sender, rcv, senderName:o.name||'Pengirim', rcvName:o.rcvName||'Penerima' };
+  if(!sender && !rcv){ toast('Nomor WA pengirim/penerima tidak tersedia','err'); return; }
+  showInvoiceTargetPicker();
+}
+let _pendingInvoice=null;
+function showInvoiceTargetPicker(){
+  const pi=_pendingInvoice; if(!pi) return;
+  let m=document.getElementById('inv-target-picker');
+  if(!m){ m=document.createElement('div'); m.id='inv-target-picker'; m.style.cssText='position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(m); }
+  const btn=(label,sub,onclick,show)=> show?`<button onclick="${onclick}" style="display:block;width:100%;background:linear-gradient(135deg,#075E54,#25D366);color:#fff;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:800;cursor:pointer;margin-bottom:9px;text-align:left">${label}<div style="font-size:10px;font-weight:500;opacity:.9">${sub}</div></button>`:'';
+  m.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--gold);border-radius:16px;padding:18px;max-width:340px;width:100%">
+    <div style="font-size:14px;font-weight:800;color:var(--gold);margin-bottom:4px">🧾 Kirim Invoice ke mana?</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Pilih tujuan pengiriman invoice via WhatsApp.</div>
+    ${btn('📤 Kirim ke Pengirim','+'+pi.sender+' · '+pi.senderName,"kirimInvoiceWA('sender')",!!pi.sender)}
+    ${btn('📥 Kirim ke Penerima','+'+pi.rcv+' · '+pi.rcvName,"kirimInvoiceWA('receiver')",!!pi.rcv)}
+    ${btn('📤📥 Kirim ke Keduanya','Pengirim lalu penerima',"kirimInvoiceWA('both')",!!(pi.sender&&pi.rcv&&pi.sender!==pi.rcv))}
+    <button onclick="closeInvoiceTargetPicker()" style="display:block;width:100%;background:#1F1F26;color:#C8C0B0;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-top:4px">Nanti saja</button>
+  </div>`;
+  m.style.display='flex';
+}
+function closeInvoiceTargetPicker(){ const m=document.getElementById('inv-target-picker'); if(m){ m.style.display='none'; m.innerHTML=''; } }
+function kirimInvoiceWA(target){
+  const pi=_pendingInvoice; if(!pi) return;
+  const txt=encodeURIComponent(pi.msg);
+  const open=(tel)=>{ if(tel) window.open('https://wa.me/'+tel+'?text='+txt,'_blank'); };
+  if(target==='sender') open(pi.sender);
+  else if(target==='receiver') open(pi.rcv);
+  else if(target==='both'){ open(pi.sender); setTimeout(()=>open(pi.rcv),1200); }
+  closeInvoiceTargetPicker();
+  toast('Invoice dibuka di WhatsApp ✅','ok');
 }
 
 // ── TRIPS ─────────────────────────────────────
@@ -2235,6 +2256,144 @@ function setupExpensesListener(){
       }
     }, e=>console.warn('Expenses:',e));
   }catch(e){ console.warn(e); }
+}
+
+// ══════════════════════════════════════════════
+// 💳 PEMBAYARAN & BUKTI TF (koleksi terpisah 'payments' → order tetap ringan, aman 1MB)
+// ══════════════════════════════════════════════
+let cachedPayments=[], _payProofStaged=null;
+function setupPaymentsListener(){
+  try{
+    db.collection('payments').onSnapshot(snap=>{
+      cachedPayments = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function'){ renderPembukuan(); }
+      if(document.getElementById('page-orders') && document.getElementById('page-orders').classList.contains('active') && typeof filterOrders==='function'){ filterOrders(); }
+    }, e=>console.warn('Payments:',e));
+  }catch(e){ console.warn(e); }
+}
+function orderPayment(orderId){ return (cachedPayments||[]).find(p=>p.orderId===orderId || p.id===orderId) || null; }
+function payProofUploadLabel(){
+  return '<label style="display:block;background:var(--dark2);border:1px dashed var(--gold3);border-radius:9px;padding:16px;text-align:center;font-size:12px;color:var(--gold);cursor:pointer">📷 Ketuk untuk pilih / ambil bukti TF<input type="file" accept="image/*" onchange="payProofPick(this)" style="display:none"></label>';
+}
+function payProofPick(input){
+  const file=input.files&&input.files[0]; if(!file) return;
+  if(file.size>10*1024*1024){ toast('Foto terlalu besar (maks 10MB)','err'); return; }
+  toast('Memproses bukti...','info');
+  compressImg(file).then(function(dataUrl){
+    _payProofStaged=dataUrl;
+    const wrap=document.getElementById('pay-proof-wrap');
+    if(wrap) wrap.innerHTML='<div style="position:relative"><img src="'+dataUrl+'" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px"><button onclick="payProofClear()" style="position:absolute;top:6px;right:6px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:7px;width:30px;height:30px;cursor:pointer">×</button></div>';
+    toast('Bukti TF siap ✅','ok');
+  }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
+}
+function payProofClear(){
+  _payProofStaged=null;
+  const wrap=document.getElementById('pay-proof-wrap');
+  if(wrap) wrap.innerHTML=payProofUploadLabel();
+}
+function bukaFotoPayment(orderId){
+  const p=orderPayment(orderId);
+  if(!p||!p.proof){ toast('Bukti TF tidak ada','err'); return; }
+  bukaFoto(p.proof, 'BuktiTF-'+(p.code||orderId)+(p.name?(' - '+p.name):''), false);
+}
+function unduhBuktiPayment(orderId){
+  const p=orderPayment(orderId);
+  if(!p||!p.proof){ toast('Bukti TF tidak ada','err'); return; }
+  simpanFoto(p.proof, 'BuktiTF-'+(p.code||orderId)+(p.name?('-'+p.name):''));
+}
+function payDiffCheck(tagihan){
+  const elA=document.getElementById('pay-amount'), elD=document.getElementById('pay-diff');
+  if(!elD) return;
+  const amt=parseFloat(elA&&elA.value)||0;
+  const diff=amt-(tagihan||0);
+  if(!amt){ elD.innerHTML='<span style="color:var(--muted)">Masukkan nominal yang diterima…</span>'; return; }
+  if(Math.abs(diff)<1){ elD.innerHTML='<span style="color:#4CAF7D;font-weight:700">✅ Sesuai tagihan (Rp'+(tagihan||0).toLocaleString('id-ID')+')</span>'; return; }
+  elD.innerHTML='<span style="color:#E8924A;font-weight:800">⚠️ '+(diff>0?'Lebih':'Kurang')+' Rp'+Math.abs(diff).toLocaleString('id-ID')+'</span> <span style="color:var(--muted)">vs tagihan Rp'+(tagihan||0).toLocaleString('id-ID')+'</span>';
+}
+// Section pembayaran di modal Kelola (dipanggil dari template openOrderModal)
+function paymentSectionHTML(o){
+  const p=orderPayment(o.id);
+  const rev=(typeof orderRevenue==='function')?Math.round(orderRevenue(o)):0;
+  const tagihan=(o.totalFinal&&o.totalFinal>0)?Math.round(o.totalFinal):rev;
+  const amt=p?(p.amount||0):tagihan;
+  const method=p?(p.method||'Transfer'):'Transfer';
+  const isCash=/cash/i.test(method);
+  const date=p?(p.date||new Date().toISOString().slice(0,10)):new Date().toISOString().slice(0,10);
+  const note=p?(p.note||''):'';
+  const _diffAmt=amt-tagihan;
+  const diffInit = !amt ? '<span style="color:var(--muted)">Masukkan nominal yang diterima…</span>'
+    : Math.abs(_diffAmt)<1 ? '<span style="color:#4CAF7D;font-weight:700">✅ Sesuai tagihan (Rp'+tagihan.toLocaleString('id-ID')+')</span>'
+    : '<span style="color:#E8924A;font-weight:800">⚠️ '+(_diffAmt>0?'Lebih':'Kurang')+' Rp'+Math.abs(_diffAmt).toLocaleString('id-ID')+'</span> <span style="color:var(--muted)">vs tagihan Rp'+tagihan.toLocaleString('id-ID')+'</span>';
+  const proofBox = (p&&p.proof)
+    ? `<div style="position:relative"><img src="${p.proof}" onclick="bukaFotoPayment('${o.id}')" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"><div style="position:absolute;bottom:6px;left:6px;background:rgba(76,175,125,.92);color:#fff;font-size:10px;font-weight:800;padding:3px 8px;border-radius:7px">✅ Tersimpan · ketuk untuk lihat</div><button onclick="payProofClear()" style="position:absolute;top:6px;right:6px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:7px;width:30px;height:30px;cursor:pointer">×</button></div>`
+    : payProofUploadLabel();
+  return `
+  <div class="divider"></div>
+  <div style="background:linear-gradient(135deg,rgba(76,175,125,.06),rgba(13,13,13,0));border:1px solid rgba(76,175,125,.3);border-radius:12px;padding:13px;margin-bottom:12px">
+    <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#4CAF7D;letter-spacing:1px;margin-bottom:10px">💳 Pembayaran & Bukti TF${p?' · ✅ Lunas':''}</div>
+    <div class="field"><label>Nominal Diterima (Rp)</label><input type="number" id="pay-amount" value="${amt}" placeholder="0" inputmode="numeric" oninput="payDiffCheck(${tagihan})"></div>
+    <div style="font-size:10px;color:var(--muted);margin:-6px 0 3px">Tagihan (Total Final): <strong style="color:var(--cream)">Rp${tagihan.toLocaleString('id-ID')}</strong></div>
+    <div id="pay-diff" style="font-size:11px;margin:0 0 10px">${diffInit}</div>
+    <div style="display:flex;gap:8px">
+      <div class="field" style="flex:1;margin:0"><label>Metode</label>
+        <select id="pay-method">
+          <option value="Transfer"${!isCash?' selected':''}>🏦 Transfer (TF)</option>
+          <option value="Cash"${isCash?' selected':''}>💵 Cash</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1;margin:0"><label>Tanggal Terima</label><input type="date" id="pay-date" value="${date}"></div>
+    </div>
+    <div class="field" style="margin-top:8px"><label>Catatan (opsional)</label><input type="text" id="pay-note" value="${note}" placeholder="mis. TF a.n. Iqbal"></div>
+    <div id="pay-proof-wrap" style="margin-bottom:10px">${proofBox}</div>
+    <button class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="savePayment('${o.id}')">💾 Simpan Pembayaran & Bukti TF</button>
+    ${p?`<button class="btn btn-block btn-ghost" style="margin-top:6px;color:#D4504A" onclick="deletePayment('${o.id}')">🗑 Hapus catatan pembayaran</button>`:''}
+  </div>`;
+}
+async function savePayment(orderId){
+  if(!guard('savepay-'+orderId,700)) return;
+  const o=(cachedOrders||[]).find(x=>x.id===orderId);
+  if(!o){ toast('Order tidak ditemukan','err'); return; }
+  const amount=parseFloat((document.getElementById('pay-amount')||{}).value)||0;
+  const method=((document.getElementById('pay-method')||{}).value||'').trim()||'Transfer';
+  const dateStr=((document.getElementById('pay-date')||{}).value||'').trim();
+  const note=((document.getElementById('pay-note')||{}).value||'').trim();
+  const existing=orderPayment(orderId);
+  const proof=_payProofStaged || (existing?existing.proof:null);
+  if(amount<=0){ toast('Isi nominal yang diterima dulu','err'); return; }
+  if(!proof){ toast('Upload bukti TF dulu','err'); return; }
+  const trip=(cachedTrips||[]).find(t=>t.id===o.tripId);
+  const courier=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
+  const payload={
+    orderId, code:o.code||o.id, name:o.name||'', route:o.route||'', tripId:o.tripId||'',
+    courier, amount, method, date:dateStr||new Date().toISOString().slice(0,10),
+    proof, note, recordedBy:currentRole||'admin', ts:Date.now(), createdAt:new Date().toISOString()
+  };
+  // optimistic: satu pembayaran per order (id = orderId)
+  cachedPayments=[...(cachedPayments||[]).filter(p=>p.id!==orderId), {...payload, id:orderId}];
+  o.payStatus='lunas';
+  _payProofStaged=null;
+  closeModal('modal-order');
+  toast('💰 Pembayaran & bukti TF tersimpan — otomatis masuk pembukuan owner ✅','ok');
+  if(typeof filterOrders==='function') filterOrders();
+  if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function') renderPembukuan();
+  try{
+    await db.collection('payments').doc(orderId).set(payload);
+    await db.collection('orders').doc(orderId).update({payStatus:'lunas'});
+  }catch(e){ toast('Gagal simpan ke server: '+e.message,'err'); }
+}
+async function deletePayment(orderId){
+  if(!guard('delpay-'+orderId,700)) return;
+  if(!confirm('Hapus catatan pembayaran & bukti TF order ini? Status bayar kembali ke Belum.')) return;
+  cachedPayments=(cachedPayments||[]).filter(p=>p.id!==orderId);
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(o) o.payStatus='belum';
+  closeModal('modal-order');
+  toast('Catatan pembayaran dihapus','err');
+  if(typeof filterOrders==='function') filterOrders();
+  if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function') renderPembukuan();
+  try{
+    await db.collection('payments').doc(orderId).delete();
+    await db.collection('orders').doc(orderId).update({payStatus:'belum'});
+  }catch(e){ toast('Gagal hapus di server: '+e.message,'err'); }
 }
 
 // === PENGELUARAN: mata uang EGP/IDR + foto bukti ===
@@ -3615,6 +3774,32 @@ function renderPembukuan(){
   });
 
   const fmt=n=>'Rp'+Math.round(n).toLocaleString('id-ID');
+  // ── 💵 PEMBAYARAN MASUK (Bukti TF) — kas aktual diterima, mudah dicek owner ──
+  const paysInPeriod=(cachedPayments||[]).filter(p=>periodFilter(p.ts||Date.now(), period));
+  let payH='';
+  if(paysInPeriod.length){
+    const totalIn=paysInPeriod.reduce((s,p)=>s+(p.amount||0),0);
+    let nWarn=0;
+    const rows=paysInPeriod.slice().sort((a,b)=>(b.ts||0)-(a.ts||0)).map(p=>{
+      const oo=(cachedOrders||[]).find(x=>x.id===p.orderId);
+      const rev=oo?Math.round(orderRevenue(oo)):null;
+      const mismatch=(rev!=null && Math.abs(rev-(p.amount||0))>=1000); if(mismatch) nWarn++;
+      const proofBtn=p.proof?`<button onclick="bukaFotoPayment('${p.orderId}')" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer">📷 Lihat</button> <button onclick="unduhBuktiPayment('${p.orderId}')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer">⬇ Unduh</button>`:'<span style="font-size:9px;color:#D4504A">tanpa bukti</span>';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <div style="min-width:0;flex:1"><div style="font-size:12px;font-weight:700;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name||'-'}${mismatch?' <span style="color:#E8924A">⚠️</span>':''}</div>
+        <div style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.code||p.orderId} · ${p.tripId||'-'} · ${p.method||''} · ${p.date||''}</div></div>
+        <div style="text-align:right;white-space:nowrap"><div style="font-size:13px;font-weight:800;color:#4CAF7D">${fmt(p.amount||0)}</div>${proofBtn}</div>
+      </div>`;
+    }).join('');
+    payH=`<div style="background:linear-gradient(135deg,rgba(76,175,125,.07),#0D0D0D);border:1.5px solid rgba(76,175,125,.35);border-radius:13px;padding:15px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:9px;border-bottom:1px solid var(--border)">
+        <div style="font-size:10px;color:#4CAF7D;text-transform:uppercase;letter-spacing:1px;font-weight:800">💵 Pembayaran Masuk (Bukti TF)</div>
+        <div style="text-align:right"><div style="font-size:16px;font-weight:900;color:#4CAF7D">${fmt(totalIn)}</div><div style="font-size:9px;color:var(--muted)">${paysInPeriod.length} pembayaran</div></div>
+      </div>
+      ${rows}
+      <div style="font-size:10px;color:var(--muted);margin-top:9px;line-height:1.5">${nWarn?('<span style="color:#E8924A">⚠️ '+nWarn+' pembayaran nominalnya berbeda dari revenue terhitung</span> — perlu dicek. '):''}Ketuk <strong style="color:#4CAF7D">📷 Bukti</strong> untuk melihat bukti transfer.</div>
+    </div>`;
+  }
   // CATATAN PEMBATALAN (terpisah, TIDAK masuk total) — transparansi ke owner
   const cancelledOrders=(cachedOrders||[]).filter(o=>{
     if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return false;
@@ -3650,6 +3835,8 @@ function renderPembukuan(){
   </div>`;
 
   // PER KURIR
+  h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff;margin-bottom:12px" onclick="exportPembukuanLengkap()">📁 Simpan Pembukuan Lengkap ke File (CSV)</button>`;
+  h+=payH;
   h+=cancelH;
   const couriers=Object.values(byCourier).filter(cd=>cd.orderCount>0 || Object.values(cd.trips).some(t=>t.expenses.length));
   if(!couriers.length){ el.innerHTML=h+'<div style="font-size:12px;color:var(--muted);text-align:center;padding:14px">Belum ada data transaksi pada periode ini</div>'; return; }
@@ -4277,6 +4464,70 @@ async function renderRekap(){
 }
 
 // ── EXPORT CSV ────────────────────────────────
+function exportPembukuanLengkap(){
+  const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
+  const rp=n=>Math.round(n||0);
+  const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+  const orders=(cachedOrders||[]).filter(o=>periodFilter(o.ts||o.createdAt||Date.now(),period));
+  const pays=(cachedPayments||[]).filter(p=>periodFilter(p.ts||Date.now(),period));
+  const exps=(cachedExpenses||[]).filter(e=>periodFilter(e.ts||Date.now(),period));
+  const payByOrder={}; pays.forEach(p=>{ payByOrder[p.orderId]=p; });
+  let tOrders=0,tRevenue=0,tTagihan=0,tKg=0,tPaid=0,tUnpaid=0,tCashIn=0,tMismatch=0,tCancelled=0,tExp=0,tComm=0;
+  const L=[];
+  L.push(['LAPORAN PEMBUKUAN LENGKAP — M.M BAGGAGE']);
+  L.push(['Dibuat', new Date().toLocaleString('id-ID')]);
+  L.push(['Periode', period]);
+  L.push([]);
+  L.push(['=== RINCIAN ORDER ===']);
+  L.push(['Kode','Nama Pengirim','WA Pengirim','Nama Penerima','WA Penerima','Rute','Trip','Kurir','Status','Status Bayar','Metode Bayar','Tgl Bayar','Berat Total (kg)','Est Total (Rp)','Tagihan/Final (Rp)','Revenue Terhitung (Rp)','Nominal Dibayar (Rp)','Selisih Bayar-Tagihan (Rp)','Ada Bukti TF','Jml Barang','Rincian Barang','Catatan']);
+  orders.forEach(o=>{
+    const trip=(cachedTrips||[]).find(t=>t.id===o.tripId);
+    const kurir=trip?(trip.courier||''):'';
+    const kg=orderKg(o);
+    const rev=orderRevenue(o);
+    const tagihan=(o.totalFinal&&o.totalFinal>0)?o.totalFinal:rev;
+    const pay=payByOrder[o.id];
+    const cancelled=o.status==='cancelled';
+    if(!cancelled){ tOrders++; tRevenue+=rev; tTagihan+=tagihan; tKg+=kg; if(o.payStatus==='lunas')tPaid++; else tUnpaid++;
+      if(o.referral&&o.referral.code) tComm+=(parseFloat(o.referral.commissionPerKg)||0)*kg;
+    } else tCancelled++;
+    if(pay){ tCashIn+=(pay.amount||0); if(Math.abs((pay.amount||0)-tagihan)>=1000) tMismatch++; }
+    const items=(o.items||[]);
+    const rincian=items.map(it=>`${it.cat}:${(it.actQty!=null?it.actQty:it.qty)||0}${it.type||'kg'}${it.status==='rejected'?'(batal)':''}`).join('; ');
+    L.push([o.code||o.id,o.name||'',o.phone||'',o.rcvName||'',o.rcvPhone||'',o.route||'',o.tripId||'',kurir,o.status||'',o.payStatus||'',
+      pay?pay.method:'',pay?pay.date:'',kg.toFixed(1),rp(o.totalEst),rp(tagihan),rp(rev),
+      pay?rp(pay.amount):'',pay?rp((pay.amount||0)-tagihan):'',pay?(pay.proof?'YA':'tidak'):'tidak',items.length,rincian,o.statusNote||o.invoiceNote||'']);
+  });
+  L.push([]);
+  L.push(['=== PEMBAYARAN MASUK (BUKTI TF) ===']);
+  L.push(['Kode','Nama','Trip','Kurir','Metode','Tanggal','Nominal (Rp)','Ada Bukti','Catatan']);
+  pays.forEach(p=>L.push([p.code||p.orderId,p.name||'',p.tripId||'',p.courier||'',p.method||'',p.date||'',rp(p.amount),p.proof?'YA':'tidak',p.note||'']));
+  L.push([]);
+  L.push(['=== PENGELUARAN ===']);
+  L.push(['Trip','Kurir','Jenis','Catatan','Nominal IDR (Rp)','Mata Uang Asli','Nominal Asli','Rate EGP','Tanggal']);
+  exps.forEach(e=>{ tExp+=(e.amount||0); L.push([e.tripId||'',e.courier||'',e.type||'',e.note||'',rp(e.amount),e.origCurrency||'IDR',e.origAmount||'',e.egpRate||'',e.createdAt?String(e.createdAt).slice(0,10):'']); });
+  L.push([]);
+  const profit=tRevenue-tExp-tComm;
+  L.push(['=== RINGKASAN TOTAL ===']);
+  L.push(['Jumlah Order (aktif)',tOrders]);
+  L.push(['Order Dibatalkan',tCancelled]);
+  L.push(['Berat Total (kg)',tKg.toFixed(1)]);
+  L.push(['Total Tagihan/Final (Rp)',rp(tTagihan)]);
+  L.push(['Total Revenue Terhitung (Rp)',rp(tRevenue)]);
+  L.push(['Total Kas Masuk / Dibayar (Rp)',rp(tCashIn)]);
+  L.push(['Selisih Kas vs Tagihan (Rp)',rp(tCashIn-tTagihan)]);
+  L.push(['Order Lunas',tPaid]);
+  L.push(['Order Belum Lunas',tUnpaid]);
+  L.push(['Pembayaran Nominal Beda (perlu cek)',tMismatch]);
+  L.push(['Total Pengeluaran (Rp)',rp(tExp)]);
+  L.push(['Total Komisi Affiliate (Rp)',rp(tComm)]);
+  L.push(['PROFIT BERSIH (Rp)',rp(profit)]);
+  L.push(['Margin (%)', tRevenue>0?Math.round(profit/tRevenue*100):0]);
+  const csv=L.map(r=>r.map(esc).join(',')).join('\n');
+  saveCSVFile(csv,'MMBaggage_Pembukuan_Lengkap_'+new Date().toISOString().slice(0,10)+'.csv');
+}
+
+// ── EXPORT CSV (order ringkas) ────────────────
 function exportCSV(){
   const headers=['Kode','Nama','WA','Rute','Trip','Status','Penerima','Alamat/Domisili','Ekspedisi','Est Total','Total Final','Status Bayar','Tgl Order','Barang'];
   const rows=cachedOrders.map(o=>[
