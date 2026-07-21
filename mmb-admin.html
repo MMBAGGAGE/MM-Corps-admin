@@ -2,6 +2,9 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="theme-color" content="#0A0A0A">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>M.M Corps — Admin Panel</title>
@@ -268,6 +271,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v3 · realtime</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1865,7 +1869,7 @@ function addAdminItem(orderId){
   db.collection('orders').doc(orderId).update({items}).then(function(){
     openOrderModal(orderId); // re-render modal supaya field baru muncul
     toast('Barang baru ditambahkan — isi detail lalu Simpan','ok');
-    refreshCapacityUI();
+    refreshCapacityUI(o.tripId);
   }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
 }
 function setItemSt(orderId,i,status){
@@ -1894,8 +1898,8 @@ function setItemSt(orderId,i,status){
     }
     card.style.opacity=status==='rejected'?'.55':'1';
   }
-  toast(status==='approved'?'Barang disetujui ✅':'Barang ditolak ❌', status==='approved'?'ok':'err');
-  refreshCapacityUI();
+  var _slot=refreshCapacityUI(o.tripId);
+  toast((status==='approved'?'Barang disetujui ✅':'Barang ditolak ❌')+(_slot?(' · '+_slot):''), status==='approved'?'ok':'err');
   db.collection('orders').doc(orderId).update({items}).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
 }
 
@@ -1926,9 +1930,10 @@ async function saveOrder(id){
   };
   // OPTIMISTIC: update cache + tutup modal instan, simpan di belakang (anti-lag)
   Object.assign(o,payload);
-  closeModal('modal-order');toast('Order diupdate! ✅','ok');
+  closeModal('modal-order');
   updateOrderBadge();
-  refreshCapacityUI();
+  var _slot=refreshCapacityUI(o.tripId);
+  toast('Order diupdate! ✅'+(_slot?(' · '+_slot):''),'ok');
   const active=document.querySelector('.page.active')?.id||'';
   if(active==='page-orders') filterOrders();
   db.collection('orders').doc(id).update(payload).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
@@ -1950,9 +1955,9 @@ async function approveOrder(id){
   if(waLink) upd.waGroupLink = waLink;
   // OPTIMISTIC: update cache + UI instan
   o.status='approved'; o.items=items; if(waLink) o.waGroupLink=waLink;
-  toast('Order disetujui ✅ Link grup WA otomatis masuk ke tracking customer','ok');
   closeModal('modal-order');
-  refreshCapacityUI();
+  var _slot=refreshCapacityUI(o.tripId);
+  toast('Order disetujui ✅ Link grup WA masuk ke tracking'+(_slot?(' · '+_slot):''),'ok');
   db.collection('orders').doc(id).update(upd).then(function(){
     sendWA(id,'approved');
   }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
@@ -1973,8 +1978,8 @@ function cancelOrder(id){
   // OPTIMISTIC: close modal + toast instantly, save in background
   o.status='cancelled'; o.items=items;
   closeModal('modal-order');
-  toast('Order ditolak ❌','err');
-  refreshCapacityUI();
+  var _slot=refreshCapacityUI(o.tripId);
+  toast('Order dibatalkan ❌'+(_slot?(' · '+_slot):''),'err');
   db.collection('orders').doc(id).update(upd).then(function(){
     if(typeof sendWA==='function') sendWA(id,'cancelled');
   }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
@@ -1983,9 +1988,12 @@ function cancelOrder(id){
 async function deleteOrder(id){
   if(!guard('del-'+id)) return;
   if(!confirm('Hapus order ini permanen? Tidak bisa dikembalikan!'))return;
+  var _o=(cachedOrders||[]).find(x=>x.id===id); var _tid=_o?_o.tripId:null;
+  // optimistic: buang dari cache lokal supaya slot langsung berkurang
+  cachedOrders=(cachedOrders||[]).filter(x=>x.id!==id);
+  var _slot=refreshCapacityUI(_tid);
+  toast('Order dihapus 🗑️'+(_slot?(' · '+_slot):''),'err');
   await db.collection('orders').doc(id).delete();
-  toast('Order dihapus 🗑️','err');
-  refreshCapacityUI();
 }
 
 // ── WA NOTIF ──────────────────────────────────
@@ -3233,14 +3241,30 @@ function syncTripCapacity(){
 // Menghitung ulang slot dari cache lokal & langsung menggambar ulang layar,
 // TANPA menunggu dua kali round-trip Firestore (sumber "slot tidak berkurang").
 // Persistensi usedKg untuk customer app tetap berjalan via syncTripCapacity().
-function refreshCapacityUI(){
-  try{ if(typeof syncTripCapacity==='function') syncTripCapacity(); }catch(e){}
+// ── PENYEGAR KAPASITAS/SLOT SEKETIKA ──
+// Dipanggil optimistik setelah SETIAP perubahan status barang/order.
+// Menghitung ulang slot dari cache lokal & LANGSUNG menggambar ulang kartu Trip,
+// TANPA syarat tab Trip harus aktif dan TANPA menunggu round-trip Firestore.
+// Persistensi usedKg untuk customer app tetap berjalan via syncTripCapacity().
+function tripSlotText(tripId){
   try{
-    const tripsActive=document.getElementById('page-trips')&&document.getElementById('page-trips').classList.contains('active');
-    if(tripsActive && typeof renderTrips==='function') renderTrips();
-    const dashActive=document.getElementById('page-dashboard')&&document.getElementById('page-dashboard').classList.contains('active');
-    if(dashActive && typeof renderDashboard==='function') renderDashboard();
-  }catch(e){}
+    const t=(cachedTrips||[]).find(x=>x.id===tripId); if(!t) return '';
+    const used=Math.round(tripUsedKg(tripId)*10)/10;
+    const cap=parseFloat(t.capacity||0)||0;
+    if(!cap) return t.id+': '+used.toFixed(1)+' kg terpakai';
+    const sisa=Math.max(0,cap-used);
+    return t.id+' → sisa '+sisa.toFixed(1)+' kg ('+used.toFixed(1)+'/'+cap+')';
+  }catch(e){ return ''; }
+}
+function refreshCapacityUI(affectedTripId){
+  // 1) Persistensi usedKg untuk customer app
+  try{ if(typeof syncTripCapacity==='function') syncTripCapacity(); }catch(e){}
+  // 2) SELALU render ulang kartu Trip — meski tab Trip belum aktif, DOM siap saat dibuka
+  try{ if(typeof renderTrips==='function') renderTrips(); }catch(e){}
+  // 3) Dashboard jika sedang aktif
+  try{ const d=document.getElementById('page-dashboard'); if(d&&d.classList.contains('active')&&typeof renderDashboard==='function') renderDashboard(); }catch(e){}
+  // 4) Kembalikan teks slot trip terkait untuk umpan balik instan (toast)
+  return affectedTripId?tripSlotText(affectedTripId):'';
 }
 function anNormPhone(p){ return String(p||'').replace(/\D/g,''); }
 function anCollect(period){
@@ -3808,7 +3832,7 @@ async function bulkUpdateStatus(tripId, status){
     catch(e){ fail++; }
   }
   toast(`✅ ${ok} order diupdate ke "${stLabel}"${fail?(' · '+fail+' gagal'):''}`,fail?'err':'ok');
-  refreshCapacityUI();
+  refreshCapacityUI(tripId);
   renderTrips(); filterOrders();
 }
 
@@ -3824,7 +3848,7 @@ function renderTrips(){
   el.innerHTML=cachedTrips.length?cachedTrips.map(t=>{
     const si=siMap[t.status]||siMap.open;
     const orders=cachedOrders.filter(o=>o.tripId===t.id&&o.status!=='cancelled');
-    const usedKg=tripUsedKg(t.id);
+    let usedKg=0; try{ usedKg=tripUsedKg(t.id); }catch(e){ usedKg=0; }
     const pct=t.capacity?Math.min(100,Math.round(usedKg/t.capacity*100)):0;
     const rev=orders.filter(o=>o.status==='delivered').reduce((s,o)=>s+(o.totalFinal||o.totalEst||0),0);
     return `<div class="trip-card">
