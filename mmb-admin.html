@@ -271,7 +271,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v7 · invoice & cukai terpadu</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v9 · pisah invoice & kwitansi lunas</div>
     <div id="trips-list"></div>
   </div>
 
@@ -368,6 +368,9 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
       <div class="fpill active" data-gf="all" onclick="setGalFilter('all',this)">Semua</div>
       <div class="fpill" data-gf="matched" onclick="setGalFilter('matched',this)">Tercocok</div>
       <div class="fpill" data-gf="unknown" onclick="setGalFilter('unknown',this)">Tanpa Nama</div>
+    </div>
+    <div class="field" style="margin-bottom:10px">
+      <input type="text" id="gal-search" placeholder="🔎 Cari nama atau kode resi..." oninput="renderGaleri()" style="width:100%">
     </div>
     <div id="gal-count" style="font-size:11px;color:var(--muted);margin-bottom:10px"></div>
     <div id="gal-grid"></div>
@@ -907,9 +910,43 @@ function updateOrderBadge(){
   try{ document.title=(total>0?'('+total+') ':'')+'M.M Corps — Admin'; }catch(e){}
 }
 
-function openModal(id){document.getElementById(id).classList.add('open')}
-function closeModal(id){document.getElementById(id).classList.remove('open')}
-document.querySelectorAll('.modal-overlay').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)el.classList.remove('open')}));
+// ── PERBAIKAN BUG SCROLL ──
+// Sebelumnya openModal/closeModal hanya toggle class, TANPA mengunci scroll
+// body. Akibatnya di iOS Safari: saat modal panjang (Kelola/Invoice) di-scroll
+// sampai batas atas/bawahnya, gestur swipe "bocor" ke halaman di belakang
+// modal (scroll chaining) — halaman background ikut melompat/bergeser,
+// kadang disertai efek karet/bounce. Ini penyebab paling umum keluhan
+// "bug saat scroll" pada app bergaya bottom-sheet seperti ini.
+// Fix: kunci body dgn position:fixed selama modal terbuka, lalu kembalikan
+// posisi scroll persis semula saat modal ditutup.
+let _scrollLockY=0, _scrollLockDepth=0;
+function openModal(id){
+  const el=document.getElementById(id); if(!el) return;
+  if(_scrollLockDepth===0){
+    _scrollLockY=window.scrollY||document.documentElement.scrollTop||0;
+    document.body.style.position='fixed';
+    document.body.style.top=(-_scrollLockY)+'px';
+    document.body.style.left='0';
+    document.body.style.right='0';
+    document.body.style.width='100%';
+  }
+  _scrollLockDepth++;
+  el.classList.add('open');
+}
+function closeModal(id){
+  const el=document.getElementById(id); if(!el) return;
+  el.classList.remove('open');
+  _scrollLockDepth=Math.max(0,_scrollLockDepth-1);
+  if(_scrollLockDepth===0){
+    document.body.style.position='';
+    document.body.style.top='';
+    document.body.style.left='';
+    document.body.style.right='';
+    document.body.style.width='';
+    window.scrollTo(0,_scrollLockY);
+  }
+}
+document.querySelectorAll('.modal-overlay').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)closeModal(el.id)}));
 
 // ── STATE ─────────────────────────────────────
 let currentRole='owner', currentUid='';
@@ -1103,8 +1140,12 @@ function renderGaleri(){
   const nUnknown=photos.filter(p=>p.kind==='unknown').length;
   if(galFilter==='matched') photos=photos.filter(p=>p.kind==='matched');
   if(galFilter==='unknown') photos=photos.filter(p=>p.kind==='unknown');
-  cnt.textContent=`Total ${total} foto · ${nMatched} tercocok · ${nUnknown} tanpa nama`;
-  if(!photos.length){ grid.innerHTML='<div class="empty" style="text-align:center;padding:30px;color:var(--muted)">Tidak ada foto untuk filter ini.</div>'; return; }
+  // ── PENCARIAN: nama pengirim atau kode resi ──
+  const qEl=document.getElementById('gal-search');
+  const q=(qEl&&qEl.value||'').trim().toLowerCase();
+  if(q){ photos=photos.filter(p=>(p.owner||'').toLowerCase().includes(q) || (p.code||'').toLowerCase().includes(q)); }
+  cnt.textContent=`Total ${total} foto · ${nMatched} tercocok · ${nUnknown} tanpa nama`+(q?` · ${photos.length} cocok dgn "${q}"`:'');
+  if(!photos.length){ grid.innerHTML='<div class="empty" style="text-align:center;padding:30px;color:var(--muted)">'+(q?'Tidak ada foto yang cocok dengan pencarian "'+escHtml(q)+'".':'Tidak ada foto untuk filter ini.')+'</div>'; return; }
   window._galPhotos = photos;   // simpan di memori, jangan tempel base64 ke atribut onclick
   grid.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'+photos.map((p,i)=>{
     const tag = p.kind==='unknown'
@@ -1812,7 +1853,7 @@ function openOrderModal(id){
       ${it.adminByAdmin?`<div class="field" style="margin-bottom:8px"><label>Nama Barang (tambahan admin)</label><input type="text" id="id-${i}" value="${it.desc||''}" placeholder="Nama/deskripsi barang..."></div>`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <div class="field" style="margin:0"><label>Berat/Qty Aktual</label><input type="number" id="iq-${i}" value="${it.actQty??it.qty}" step="0.01" inputmode="decimal"></div>
-        <div class="field" style="margin:0"><label>Harga/<span id="unitlbl-${i}">${it.type||'kg'}</span>${it.adminPriced?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ir-${i}" value="${it.actRate??it.rate??(it.adminPriced?'':150000)}" placeholder="${it.adminPriced?'Tentukan harga...':''}" inputmode="numeric"></div>
+        <div class="field" style="margin:0"><label>Harga/<span id="unitlbl-${i}">${it.type||'kg'}</span>${it.adminPriced?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ir-${i}" value="${itemRateInputValue(it)}" placeholder="${it.adminPriced?'Tentukan harga...':''}" style="${it.adminPriced&&!itemRateInputValue(it)?'border:2px solid #D4A017':''}" inputmode="numeric"></div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
@@ -2097,7 +2138,7 @@ function sendWA(id,overrideSt){
     grupWA='\n\n━━━━━━━━━━━━━━\n🔔 *WAJIB GABUNG GRUP WHATSAPP TRIP*\nLink grup akan kami kirimkan sesaat lagi. Mohon *segera gabung* saat linknya dibagikan — semua info penting diumumkan di sana, dan bisa juga dipantau lewat menu *Cek Status* di aplikasi.';
   }
 
-  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode     : *${o.code||o.id}*\n🗺️ Rute     : ${o.route}${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 Total    : ${fmtRp(total)}\n💳 Bayar    : ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${grupWA}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 *KODE: ${o.code||o.id}*\n🗺️ Rute: *${o.route}*${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 *Total: ${fmtRp(total)}*\n💳 *Bayar: ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${grupWA}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
   window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
 }
 
@@ -2105,12 +2146,17 @@ function sendWA(id,overrideSt){
 function openInvoiceModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
-  const itemsHTML=(o.items||[]).filter(it=>it.status!=='rejected'&&it.status!=='cancel_requested').map((it,i)=>{
+  const visibleItems=(o.items||[]).filter(it=>it.status!=='rejected'&&it.status!=='cancel_requested');
+  const nCustomer=visibleItems.filter(it=>!it.adminByAdmin).length;
+  const nAdmin=visibleItems.filter(it=>it.adminByAdmin).length;
+  const itemsHTML=visibleItems.map((it,i)=>{
     const realIdx=(o.items||[]).indexOf(it);
     const unit=it.type||'kg';
+    const rateVal=itemRateInputValue(it);
+    const needsPrice=it.adminPriced && !rateVal;
     return `
-    <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:8px" data-ividx="${realIdx}">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${it.cat}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span></div>
+    <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:8px;${needsPrice?'border:1px solid rgba(212,160,23,.6)':''}" data-ividx="${realIdx}">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${it.cat}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span>${it.adminByAdmin?' <span style="font-size:9px;font-weight:700;color:#D4A017;background:rgba(212,160,23,.12);padding:1px 6px;border-radius:5px">⚖️ TAMBAHAN ADMIN</span>':''}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -2120,12 +2166,13 @@ function openInvoiceModal(id){
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div class="field" style="margin:0"><label>Aktual <span id="ivunitlbl-${realIdx}">${unit}</span></label><input type="number" id="ivq-${realIdx}" value="${it.actQty??it.qty}" step="0.01" oninput="calcInv()" inputmode="decimal"></div>
-        <div class="field" style="margin:0"><label>Harga/<span id="ivunitlbl2-${realIdx}">${unit}</span></label><input type="number" id="ivr-${realIdx}" value="${it.actRate??it.rate??(it.adminPriced?'':150000)}" placeholder="${it.adminPriced?'wajib isi':''}" oninput="calcInv()" inputmode="numeric"></div>
+        <div class="field" style="margin:0"><label>Harga/<span id="ivunitlbl2-${realIdx}">${unit}</span>${needsPrice?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ivr-${realIdx}" value="${rateVal}" placeholder="${it.adminPriced?'wajib isi':''}" style="${needsPrice?'border:2px solid #D4A017':''}" oninput="calcInv()" inputmode="numeric"></div>
       </div>
     </div>`;
   }).join('');
 
   document.getElementById('invoice-form').innerHTML=`
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;padding:8px 10px;background:var(--dark4);border-radius:8px">🧾 <strong style="color:var(--cream3)">${nCustomer}</strong> barang sesuai pesanan customer${nAdmin?` · <strong style="color:#D4A017">${nAdmin}</strong> barang tambahan admin`:''}</div>
     ${itemsHTML}
     <div class="field"><label>Biaya Cukai / Pajak (Rp)</label><input type="number" id="iv-cukai" value="${o.cukaiAmount||0}" inputmode="numeric" oninput="calcInv()"></div>
     <div class="field"><label>Catatan Invoice</label><input type="text" id="iv-note" value="${o.invoiceNote||''}" placeholder="Catatan tambahan..."></div>
@@ -2183,6 +2230,21 @@ function calcInv(){
 async function saveInvoice(){
   if(!guard('saveinv-'+editOrderId)) return;
   const o=cachedOrders.find(x=>x.id===editOrderId);if(!o)return;
+  // ── CEGAH BUG "total tidak sesuai": tolak simpan kalau ada barang tambahan
+  // admin yang harganya masih 0/kosong — inilah akar masalah yang pernah
+  // membuat total invoice tidak mencerminkan barang tambahan admin.
+  const unfilled=[];
+  (o.items||[]).forEach(function(it,i){
+    if(it.status==='rejected'||it.status==='cancel_requested') return;
+    if(!it.adminPriced) return;
+    const rEl=document.getElementById('ivr-'+i);
+    const r=parseFloat(rEl&&rEl.value)||0;
+    if(r<=0) unfilled.push(it.cat||'Barang tambahan');
+  });
+  if(unfilled.length){
+    toast('⚠️ Isi dulu harga: '+unfilled.join(', ')+' — kalau tidak, total invoice akan salah','err');
+    return;
+  }
   // Simpan hanya item yang tampil (approved/pending), pakai index asli
   const invItems=[];
   const newItems=(o.items||[]).map((it,i)=>{
@@ -2227,9 +2289,11 @@ async function saveInvoice(){
     invoiceNote:document.getElementById('iv-note')?.value||'',
   }).catch(function(e){ toast('Gagal simpan invoice: '+e.message,'err'); });
   const lines=invItems.map(it=>`• ${it.cat} (${it.qty} ${it.type}): ${fmtRp(it.qty*it.rate)}`).join('\n');
-  const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
-  const fbUrl=trackUrl+'#feedback';
-  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*INVOICE RESMI M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode  : *${o.code||o.id}*\n📅 Tgl    : ${new Date().toLocaleDateString('id-ID')}\n━━━━━━━━━━━━━━\n${lines}${cukai?'\n• Cukai/Pajak : '+fmtRp(cukai):''}\n━━━━━━━━━━━━━━\n💰 *TOTAL: ${fmtRp(total)}*\n\nMohon lakukan pembayaran sesuai total di atas 🙏\n\n✨ _Kepercayaan Anda adalah prioritas kami._ Kami berkomitmen menghadirkan layanan pengiriman bagasi Cairo–Jakarta yang *aman, cepat, dan transparan* untuk Anda.\n\n⭐ *Bagaimana pengalaman Anda bersama kami?*\nLuangkan 30 detik untuk beri bintang, kesan, & saran di:\n👉 ${fbUrl}\n\nMasukan Anda membantu M.M Baggage terus berkembang & melayani lebih baik. 🌟\n━━━━━━━━━━━━━━\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  // ── INVOICE PENAGIHAN — dokumen TAGIHAN, bukan bukti lunas ──
+  // Sengaja TIDAK pernah mengklaim "sudah lunas" atau "Selesai" di sini,
+  // walau di sistem status order otomatis jadi 'delivered' (utk Rekap).
+  // Konfirmasi lunas & Selesai punya pesan SENDIRI: lihat kirimKwitansiLunas().
+  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*INVOICE PENAGIHAN — M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode  : *${o.code||o.id}*\n📅 Tgl    : ${new Date().toLocaleDateString('id-ID')}\n━━━━━━━━━━━━━━\n${lines}${cukai?'\n• Cukai/Pajak : '+fmtRp(cukai):''}\n━━━━━━━━━━━━━━\n💰 *TOTAL TAGIHAN: ${fmtRp(total)}*\n\nMohon lakukan pembayaran sesuai total di atas 🙏\nBukti transfer akan kami konfirmasi terpisah setelah diverifikasi admin.\n\n✨ _Kepercayaan Anda adalah prioritas kami._ Kami berkomitmen menghadirkan layanan pengiriman bagasi Cairo–Jakarta yang *aman, cepat, dan transparan* untuk Anda.\n━━━━━━━━━━━━━━\n_M.M Baggage — Cairo ↔ Jakarta_`;
   // Simpan pesan + tujuan, lalu tampilkan pemilih tujuan (fleksibel: pengirim / penerima / keduanya)
   const sender=(o.phone||'').replace(/\D/g,'');
   const rcv=(o.rcvPhone||'').replace(/\D/g,'');
@@ -2411,8 +2475,29 @@ function paymentSectionHTML(o){
     <div class="field" style="margin-top:8px"><label>Catatan (opsional)</label><input type="text" id="pay-note" value="${note}" placeholder="mis. TF a.n. Iqbal"></div>
     <div id="pay-proof-wrap" style="margin-bottom:10px">${proofBox}</div>
     <button class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="savePayment('${o.id}')">💾 Simpan Pembayaran & Bukti TF</button>
+    ${p?`<button class="btn btn-block" style="margin-top:8px;background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff" onclick="kirimKwitansiLunas('${o.id}')">✅ Kirim Kwitansi Lunas ke Customer</button>`:''}
     ${p?`<button class="btn btn-block btn-ghost" style="margin-top:6px;color:#D4504A" onclick="deletePayment('${o.id}')">🗑 Hapus catatan pembayaran</button>`:''}
   </div>`;
+}
+// ── KWITANSI LUNAS — dokumen BUKTI PEMBAYARAN, berbeda dari Invoice Penagihan ──
+// Invoice (saveInvoice) = tagihan, dikirim SEBELUM/saat menagih.
+// Kwitansi ini = bukti pembayaran diterima, dikirim SETELAH bukti TF disimpan.
+// Dua pesan yang jelas beda tujuan supaya tidak membingungkan customer
+// (mis. diminta bayar & dibilang "Selesai" dalam pesan yang sama).
+function kirimKwitansiLunas(orderId){
+  if(!guard('kwitansi-'+orderId,600)) return;
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const p=orderPayment(orderId);
+  if(!p){ toast('Belum ada catatan pembayaran tersimpan untuk order ini','err'); return; }
+  const tagihan=(o.totalFinal&&o.totalFinal>0)?Math.round(o.totalFinal):Math.round(orderRevenue(o));
+  const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
+  const fbUrl=trackUrl+'#feedback';
+  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*KWITANSI PEMBAYARAN LUNAS*\n━━━━━━━━━━━━━━\n📋 Kode        : *${o.code||o.id}*\n📅 Tgl Bayar   : ${p.date||new Date().toISOString().slice(0,10)}\n💳 Metode      : ${/cash/i.test(p.method||'')?'💵 Cash':'🏦 Transfer'}\n💰 Diterima    : *${fmtRp(p.amount||0)}*\n━━━━━━━━━━━━━━\n✅ *PEMBAYARAN SUDAH DITERIMA & LUNAS*\n✅ *Status Pesanan: SELESAI*\n\nTerima kasih atas kepercayaan Anda! 🙏 Pesanan Anda telah kami proses tuntas dari awal hingga akhir.\n\n⭐ *Bagaimana pengalaman Anda bersama kami?*\nLuangkan 30 detik untuk beri bintang, kesan, & saran di:\n👉 ${fbUrl}\n\nMasukan Anda membantu M.M Baggage terus berkembang & melayani lebih baik. 🌟\n━━━━━━━━━━━━━━\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  const sender=(o.phone||'').replace(/\D/g,'');
+  const rcv=(o.rcvPhone||'').replace(/\D/g,'');
+  _pendingInvoice={ id:o.id, msg, sender, rcv, senderName:o.name||'Pengirim', rcvName:o.rcvName||'Penerima' };
+  if(!sender && !rcv){ toast('Nomor WA pengirim/penerima tidak tersedia','err'); return; }
+  showInvoiceTargetPicker();
 }
 async function savePayment(orderId){
   if(!guard('savepay-'+orderId,700)) return;
@@ -2437,7 +2522,7 @@ async function savePayment(orderId){
   cachedPayments=[...(cachedPayments||[]).filter(p=>p.id!==orderId), {...payload, id:orderId}];
   o.payStatus='lunas';
   _payProofStaged=null;
-  closeModal('modal-order');
+  closeModal('modal-invoice');
   toast('💰 Pembayaran & bukti TF tersimpan — otomatis masuk pembukuan owner ✅','ok');
   if(typeof filterOrders==='function') filterOrders();
   if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function') renderPembukuan();
@@ -2565,6 +2650,18 @@ async function deleteExpense(id){
 // Revenue AKTUAL: hanya item yang benar-benar disetujui (approved).
 // Item rejected / cancel_requested / cancelled TIDAK dihitung. Ini basis anti-korupsi.
 function itemIsBillable(it){ return it.status==='approved'; }
+// ── PERBAIKAN BUG: harga barang tambahan admin ──
+// `it.actRate ?? it.rate ?? ...` TIDAK menganggap 0 sebagai "belum diisi"
+// (nullish coalescing hanya jatuh ke fallback kalau null/undefined, bukan 0).
+// Barang tambahan admin dimulai dgn actRate:0 → input menampilkan angka "0"
+// yang menutupi placeholder "wajib isi" → admin lupa isi → harga tetap 0 →
+// total invoice tidak sesuai. Fungsi ini dipakai di KELOLA & INVOICE supaya
+// keduanya konsisten dan bug ini tidak bisa muncul lagi di salah satu tempat.
+function itemRateInputValue(it){
+  const cur = (it.actRate!=null && it.actRate!==0) ? it.actRate : ((it.rate!=null && it.rate!==0) ? it.rate : null);
+  if(cur!=null) return cur;
+  return it.adminPriced ? '' : 150000; // adminPriced tanpa harga → KOSONGKAN agar placeholder tampil
+}
 // ── SUMBER TUNGGAL PERHITUNGAN TOTAL ──
 // Dipakai oleh KELOLA (hapus barang, ubah cukai) DAN INVOICE (saveInvoice).
 // Keduanya WAJIB memanggil fungsi ini — bukan menghitung ulang sendiri-sendiri —
@@ -4071,7 +4168,7 @@ function openBulkStatus(tripId, route){
   const modal=document.getElementById('modal-bulk-status');
   document.getElementById('bulk-status-info').innerHTML=`Trip: <strong>${tripId}</strong> · ${route}<br>${orders.length} order aktif akan diubah statusnya.`;
   document.getElementById('bulk-status-opts').innerHTML=opts;
-  modal.classList.add('open');
+  openModal('modal-bulk-status');
 }
 
 async function bulkUpdateStatus(tripId, status){
@@ -4305,7 +4402,7 @@ function previewFiles(input){
 // ~coret~. Jadi penekanan dibuat lewat tebal + baris mencolok di paling atas
 // pesan, bukan karakter unicode underline yang berisiko pecah di sebagian HP.
 function waMustReadNotice(){
-  return '⚠️ *MOHON DIBACA SAMPAI SELESAI* ⚠️\n_(please read this full message)_\n';
+  return '⚠️ *PENTING — WAJIB BACA SAMPAI HABIS* ⚠️\n━━━━━━━━━━━━━━\n*JANGAN LEWATKAN informasi penting di pesan ini.*\n_(IMPORTANT — Please read entire message. Do not skip.)_\n━━━━━━━━━━━━━━\n';
 }
 function notifPhotoUploaded(o){
   const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
