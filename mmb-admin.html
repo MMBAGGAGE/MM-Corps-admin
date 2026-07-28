@@ -282,7 +282,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v23 · rekap 3 laporan & belum masuk</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v24 · laporan per kurir gabungan & pribadi</div>
     <div id="trips-list"></div>
   </div>
 
@@ -4618,7 +4618,9 @@ function renderPembukuan(){
   </div>`;
 
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#D4A017,#8B6914);color:#1a1508;font-weight:800;margin-bottom:8px" onclick="exportLaporanProfesional()">📊 Export Laporan Profesional (untuk Investor)${hasSpecificFilter?' — '+(fKurir||fRute):''}</button>`;
-  h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Laporan rapi & siap diserahkan: tanpa transaksi batal, ada bagi hasil investor (jika ada), analisis per trip, dan total keseluruhan di akhir. ${hasSpecificFilter?'Cakupan ikut filter Kurir/Rute di atas.':'Pilih Kurir/Rute di atas dulu untuk mempersempit cakupan laporan.'}</div>`;
+  h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Laporan rapi & siap diserahkan: tanpa transaksi batal, ada bagi hasil investor (jika ada, digabung per kurir/trip), analisis per trip, dan total keseluruhan di akhir. ${hasSpecificFilter?'Cakupan ikut filter Kurir/Rute di atas.':'Pilih Kurir/Rute di atas dulu untuk mempersempit cakupan laporan.'}</div>`;
+  h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#8B6914,#D4A017);color:#1a1508;font-weight:800;margin-bottom:8px" onclick="exportLaporanPribadi()">📋 Export Laporan Pribadi (Semua Kurir, Format Sama)</button>`;
+  h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Format & struktur IDENTIK dengan laporan investor di atas — bedanya mencakup SEMUA kurir & rute, tidak terikat filter di layar. Cocok untuk arsip pribadi Anda.</div>`;
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff;margin-bottom:12px" onclick="exportPembukuanLengkap()">📁 Simpan Pembukuan Lengkap ke File (CSV)</button>`;
   h+=payH;
   h+=cancelH;
@@ -5983,10 +5985,10 @@ function exportPembukuanLengkap(){
 //   • TOTAL KESELURUHAN (uang masuk vs keluar) di baris paling akhir
 //   • Format rapi dgn garis pemisah tegas — layak dibaca pihak luar
 // ══════════════════════════════════════════════════
-function exportLaporanProfesional(){
+function exportLaporanProfesional(overrideKurir, overrideRute, isPersonal){
   const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
-  const fKurir=document.getElementById('pemb-filter-kurir')?.value||'';
-  const fRute=document.getElementById('pemb-filter-rute')?.value||'';
+  const fKurir = overrideKurir!=null ? overrideKurir : (document.getElementById('pemb-filter-kurir')?.value||'');
+  const fRute = overrideRute!=null ? overrideRute : (document.getElementById('pemb-filter-rute')?.value||'');
   const periodLabel={all:'Semua Waktu',month:'Bulan Ini','30':'30 Hari Terakhir'}[period]||period;
   const scopeLabel = fKurir&&fRute ? `Kurir ${fKurir} · Rute ${fRute}` : fKurir ? `Kurir ${fKurir}` : fRute ? `Rute ${fRute}` : 'Semua Kurir & Rute';
 
@@ -6017,6 +6019,7 @@ function exportLaporanProfesional(){
   garis();
   L.push(['M.M BAGGAGE — LAPORAN KEUANGAN']);
   garis();
+  L.push(['Diperuntukkan', isPersonal?'Arsip Pribadi Owner':'Investor / Pihak Eksternal']);
   L.push(['Cakupan Laporan', scopeLabel]);
   L.push(['Periode', periodLabel]);
   L.push(['Tanggal Diterbitkan', new Date().toLocaleString('id-ID')]);
@@ -6064,33 +6067,85 @@ function exportLaporanProfesional(){
   garis();
   L.push([]);
 
-  // ── BAGI HASIL INVESTOR (kalau ada trip investor dalam cakupan) ──
-  const investorTripsInScope=(cachedTrips||[]).filter(t=>allowedTripIds.has(t.id) && t.investorEnabled);
-  if(investorTripsInScope.length){
-    L.push(['BAGI HASIL INVESTOR']);
+  // ══════════════════════════════════════════════════
+  // LAPORAN PER KURIR — konsolidasi 1 kurir/1 trip gabungan (ikut toggle
+  // "Gabung PP" yang sama dgn tampilan layar Pembukuan, pakai tripDisplayKey()
+  // yang sama). Kalau kurir menjalankan Cairo→Jakarta→Cairo sbg satu
+  // perjalanan, angkanya DIGABUNG jadi satu — tidak diulang dua kali —
+  // tapi rincian tiap rute tetap dijelaskan sebagai breakdown di dalamnya.
+  // ══════════════════════════════════════════════════
+  L.push(['LAPORAN PER KURIR']);
+  garis();
+  const kuriersInScope=[...new Set((cachedTrips||[]).filter(t=>allowedTripIds.has(t.id)).map(t=>t.courier||'Tanpa Kurir'))].sort();
+  kuriersInScope.forEach(kurirName=>{
+    const kurirTrips=(cachedTrips||[]).filter(t=>allowedTripIds.has(t.id) && (t.courier||'Tanpa Kurir')===kurirName);
+    // Kelompokkan trip milik kurir ini berdasarkan tripDisplayKey (SAMA dgn
+    // logika Gabung PP di layar) — supaya 1 trip gabungan = 1 blok laporan.
+    const groups={};
+    kurirTrips.forEach(t=>{
+      const dk=tripDisplayKey(t.id);
+      groups[dk.key]=groups[dk.key]||{label:dk.label, legs:[]};
+      groups[dk.key].legs.push(t);
+    });
+    L.push([`KURIR: ${kurirName}`]);
     garisTipis();
-    investorTripsInScope.forEach(t=>{
-      const tOrders=orders.filter(o=>o.tripId===t.id);
-      const rev=tOrders.reduce((s,o)=>s+orderRevenue(o),0);
-      const revPaid=tOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+orderRevenue(o),0);
-      const cost=expsBagasi.filter(e=>e.tripId===t.id).reduce((s,e)=>s+(e.amount||0),0);
-      const comm=tOrders.reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
-      const commPaid=tOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
-      const pProfit=rev-cost-comm, pConfirmed=revPaid-cost-commPaid;
-      const pct=t.investorPercent||0;
-      L.push(['Trip', t.id+' · '+(t.route||'')+' · '+(t.date||'')]);
-      L.push(['Nama Investor', t.investorName||'(belum diisi)']);
-      L.push(['Persentase Investor', pct+'%']);
-      L.push(['Profit Trip (Potensial)', frp(pProfit)]);
-      L.push(['  → Bagian Investor', frp(pProfit*(pct/100))]);
-      L.push(['  → Bagian Owner', frp(pProfit-pProfit*(pct/100))]);
-      L.push(['Profit Trip (Terkonfirmasi/Lunas)', frp(pConfirmed)]);
-      L.push(['  → Bagian Investor', frp(pConfirmed*(pct/100))]);
-      L.push(['  → Bagian Owner', frp(pConfirmed-pConfirmed*(pct/100))]);
+    Object.values(groups).forEach(g=>{
+      const legIds=g.legs.map(t=>t.id);
+      const legOrders=orders.filter(o=>legIds.includes(o.tripId));
+      const isMerged=g.legs.length>1;
+      if(isMerged) L.push(['Trip Gabungan (1 Kurir/1 Perjalanan)', g.legs.map(t=>t.id).join(' ↔ ')]);
+      else L.push(['Trip', g.legs[0].id]);
+      // Rincian per rute — SUPAYA tetap jelas Cairo→Jakarta dapat berapa,
+      // Jakarta→Cairo dapat berapa, walau totalnya nanti digabung jadi satu.
+      L.push(['Rincian per Rute:']);
+      g.legs.forEach(t=>{
+        const legO=orders.filter(o=>o.tripId===t.id);
+        const legRev=legO.reduce((s,o)=>s+orderRevenue(o),0);
+        const legKg=legO.reduce((s,o)=>s+orderKg(o),0);
+        const legCukai=legO.reduce((s,o)=>s+(o.cukaiAmount||0),0);
+        L.push([`  • ${t.route||'-'} (${t.id})`, `${legO.length} order · ${legKg.toFixed(1)} kg · Revenue ${frp(legRev)} · Cukai ${frp(legCukai)}`]);
+      });
+      // Total GABUNGAN (satu kali hitung, tidak diulang per rute)
+      const gRev=legOrders.reduce((s,o)=>s+orderRevenue(o),0);
+      const gRevPaid=legOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+orderRevenue(o),0);
+      const gCost=expsBagasi.filter(e=>legIds.includes(e.tripId)).reduce((s,e)=>s+(e.amount||0),0);
+      const gComm=legOrders.reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
+      const gCommPaid=legOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
+      const gCukaiIn=legOrders.reduce((s,o)=>s+(o.cukaiAmount||0),0);
+      const gCukaiOut=expsCukai.filter(e=>legIds.includes(e.tripId)).reduce((s,e)=>s+(e.amount||0),0);
+      const gProfit=gRev-gCost-gComm;
+      const gProfitConfirmed=gRevPaid-gCost-gCommPaid;
+      L.push([isMerged?'Total Gabungan (kedua rute)':'Total', `Revenue ${frp(gRev)} · Modal&Biaya ${frp(gCost)} · Komisi ${frp(gComm)}`]);
+      L.push(['Profit (Potensial)', frp(gProfit)]);
+      L.push(['Profit (Terkonfirmasi/Lunas)', frp(gProfitConfirmed)]);
+
+      // Bagi Hasil Investor — kalau SALAH SATU leg sudah diaktifkan investor
+      // (asumsi: investor mendanai tiket 1 perjalanan penuh, bukan per-arah)
+      const investorLeg=g.legs.find(t=>t.investorEnabled);
+      if(investorLeg){
+        const pct=investorLeg.investorPercent||0;
+        L.push([]);
+        L.push(['  Bagi Hasil Investor']);
+        L.push(['  Nama Investor', investorLeg.investorName||'(belum diisi)']);
+        L.push(['  Persentase Investor', pct+'%']);
+        L.push(['  Profit Gabungan (Potensial) → Investor / Owner', frp(gProfit*(pct/100))+' / '+frp(gProfit-gProfit*(pct/100))]);
+        L.push(['  Profit Gabungan (Terkonfirmasi) → Investor / Owner', frp(gProfitConfirmed*(pct/100))+' / '+frp(gProfitConfirmed-gProfitConfirmed*(pct/100))]);
+      }
       garisTipis();
     });
+    // Ringkasan Tagihan Kurir — komprehensif, gabungan SEMUA trip kurir ini
+    // dalam cakupan laporan (bukan cuma 1 grup), bagasi MAUPUN cukai.
+    const kurirTripIds=kurirTrips.map(t=>t.id);
+    const kurirOrders=orders.filter(o=>kurirTripIds.includes(o.tripId));
+    const kurirTagihanBagasi=kurirOrders.reduce((s,o)=>s+orderRevenue(o),0);
+    const kurirTagihanCukai=kurirOrders.reduce((s,o)=>s+(o.cukaiAmount||0),0);
+    L.push([`Ringkasan Tagihan Kurir ${kurirName} (Komprehensif)`]);
+    L.push(['  Total Tagihan Bagasi', frp(kurirTagihanBagasi)]);
+    L.push(['  Total Tagihan Cukai', frp(kurirTagihanCukai)]);
+    L.push(['  TOTAL TAGIHAN KESELURUHAN (Bagasi + Cukai)', frp(kurirTagihanBagasi+kurirTagihanCukai)]);
+    garis();
     L.push([]);
-  }
+  });
 
   // ── RINCIAN TRANSAKSI (order batal TIDAK disertakan) ──
   L.push(['RINCIAN TRANSAKSI']);
@@ -6175,7 +6230,15 @@ function exportLaporanProfesional(){
 
   const csv=L.map(r=>r.map(esc).join(',')).join('\n');
   const scopeSlug=(fKurir||fRute||'Semua').replace(/[^a-zA-Z0-9]/g,'');
-  saveCSVFile(csv,'MMBaggage_Laporan_Investor_'+scopeSlug+'_'+new Date().toISOString().slice(0,10)+'.csv');
+  const filePrefix=isPersonal?'MMBaggage_Laporan_Pribadi_':'MMBaggage_Laporan_Investor_';
+  saveCSVFile(csv,filePrefix+scopeSlug+'_'+new Date().toISOString().slice(0,10)+'.csv');
+}
+// ── LAPORAN PRIBADI — format & struktur IDENTIK dgn laporan investor,
+// bedanya cakupan dipaksa "Semua Kurir & Rute" (bukan hanya yg difilter di
+// layar) dan label letterhead "Arsip Pribadi Owner". Tidak ada logika baru —
+// memakai fungsi yg SAMA supaya kedua laporan tidak pernah berbeda format.
+function exportLaporanPribadi(){
+  exportLaporanProfesional('', '', true);
 }
 
 // ── EXPORT CSV (order ringkas) ────────────────
