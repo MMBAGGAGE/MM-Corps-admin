@@ -263,7 +263,11 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- ORDERS -->
   <div id="page-orders" class="page">
     <div class="sec-ttl">Semua Order <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="exportCSV()">📊 CSV</button> <button class="btn btn-dark" style="font-size:10px;padding:5px 10px" onclick="simpanSemuaKontak()">💾 Semua Kontak</button></div>
-    <div class="search-wrap"><input type="text" id="ord-search" placeholder="Cari nama / kode order..." oninput="filterOrders()"><span>🔍</span></div>
+    <div class="search-wrap"><input type="text" id="ord-search" placeholder="Cari nama / kode / no. WA..." oninput="filterOrders()"><span>🔍</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <select id="ord-filter-trip" onchange="filterOrders()" style="font-size:11px"><option value="">✈️ Semua Trip</option></select>
+      <select id="ord-filter-kurir" onchange="filterOrders()" style="font-size:11px"><option value="">🧑‍✈️ Semua Kurir</option></select>
+    </div>
     <div class="filter-bar" id="filter-bar"></div>
     <div id="orders-list"></div>
   </div>
@@ -271,7 +275,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v9 · pisah invoice & kwitansi lunas</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v10 · audit & klasifikasi trip/kurir</div>
     <div id="trips-list"></div>
   </div>
 
@@ -448,6 +452,10 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
       <option value="30">30 Hari Terakhir</option>
       <option value="month">Bulan Ini</option>
     </select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:2px">
+      <div class="field"><label>Trip</label><select id="an-trip" onchange="renderAnalisis()"><option value="">Semua Trip</option></select></div>
+      <div class="field"><label>Kurir</label><select id="an-kurir" onchange="renderAnalisis()"><option value="">Semua Kurir</option></select></div>
+    </div>
     <div id="analisis-content"></div>
   </div>
 
@@ -477,6 +485,8 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   </div>
 
   <div id="page-settings" class="page">
+    <div class="search-wrap" style="margin-bottom:12px"><input type="text" id="settings-search" placeholder="🔎 Cari pengaturan (harga, referral, drop point, dll)..." oninput="filterSettingsSections()"><span>🔍</span></div>
+    <div id="settings-search-empty" style="display:none;text-align:center;padding:20px;color:var(--muted);font-size:12px">Tidak ada bagian pengaturan yang cocok dengan pencarian ini.</div>
 
     <!-- BERSIHKAN ORDER SAMPAH -->
     <div class="sec-card" style="border-color:rgba(212,160,23,.3)">
@@ -538,6 +548,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
     <div class="sec-card">
       <div class="sec-lbl">📦 Kategori Barang & Harga</div>
       <p style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Atur nama, harga, satuan (kg/pcs), dan rute per kategori. Perubahan langsung tampil ke customer.</p>
+      <div class="search-wrap" style="margin-bottom:10px"><input type="text" id="cat-search" placeholder="🔎 Cari nama kategori/barang..." oninput="renderCatList()"><span>🔍</span></div>
       <div id="cat-list"></div>
       <button class="btn btn-ghost btn-block" onclick="addCat()" style="border:1px dashed var(--border);margin-top:4px">+ Tambah Kategori</button>
       <button class="btn btn-teal btn-block" onclick="saveCats()" style="margin-top:8px">💾 Simpan Kategori & Harga</button>
@@ -1079,12 +1090,12 @@ function showPage(id){
   if(pg) pg.classList.add('active');
   document.querySelectorAll('.tab').forEach(t=>{if(t.textContent.replace(/\s*\d+\s*$/,'').trim()===TAB_LABELS[id])t.classList.add('active');});
   if(typeof updateOrderBadge==='function') updateOrderBadge();
-  if(id==='orders') filterOrders();
+  if(id==='orders'){ fillOrderClassifyDropdowns(); filterOrders(); }
   if(id==='trips'){ renderTrips(); }
   if(id==='rekap') renderRekap();
   if(id==='settings'){ renderSettings(); if(typeof renderAkun==='function') renderAkun(); }
   if(id==='pembukuan'){ fillExpenseTripDropdown(); renderPembukuan(); }
-  if(id==='analisis') renderAnalisis();
+  if(id==='analisis'){ fillAnalisisDropdowns(); renderAnalisis(); }
   if(id==='kurir') initKurirPage();
   if(id==='galeri') initGaleri();
   if(id==='event'){ if(typeof initEventPage==='function') initEventPage(); if(typeof _fetchEntries==='function') _fetchEntries(true); }
@@ -1362,12 +1373,35 @@ function renderSettings(){
   const jktEl=document.getElementById('dp-jkt');
   if(cairoEl) cairoEl.value=dp['Cairo → Jakarta']?.address||'';
   if(jktEl) jktEl.value=dp['Jakarta → Cairo']?.address||'';
+  filterSettingsSections(); // terapkan ulang pencarian aktif (kalau ada) setelah render
+}
+// ── PENCARIAN UMUM DI SETTINGS ──
+// Menyembunyikan bagian (.sec-card) yang tidak cocok dengan kata kunci,
+// dicek dari judul bagian (.sec-lbl) MAUPUN isi teksnya — supaya "cari
+// harga" atau "cari hal lain" (referral, drop point, migrasi, dst) sama² kena.
+function filterSettingsSections(){
+  const page=document.getElementById('page-settings'); if(!page) return;
+  const q=(document.getElementById('settings-search')?.value||'').toLowerCase().trim();
+  const cards=page.querySelectorAll(':scope > .sec-card');
+  let shown=0;
+  cards.forEach(card=>{
+    if(!q){ card.style.display=''; shown++; return; }
+    const match=(card.textContent||'').toLowerCase().includes(q);
+    card.style.display=match?'':'none';
+    if(match) shown++;
+  });
+  const empty=document.getElementById('settings-search-empty');
+  if(empty) empty.style.display=(q && !shown)?'block':'none';
 }
 
 function renderCatList(){
   const cats=cachedSettings.cats||[];
   const rates=cachedSettings.rates||{};
-  document.getElementById('cat-list').innerHTML=cats.map((c,i)=>{
+  const catQ=(document.getElementById('cat-search')?.value||'').toLowerCase().trim();
+  let shown=0;
+  const html=cats.map((c,i)=>{
+    if(catQ && !((c.label||'').toLowerCase().includes(catQ) || (c.sub||'').toLowerCase().includes(catQ))) return '';
+    shown++;
     const routes=c.routes||['Cairo → Jakarta','Jakarta → Cairo'];
     const hasCJ=routes.includes('Cairo → Jakarta');
     const hasJC=routes.includes('Jakarta → Cairo');
@@ -1429,6 +1463,7 @@ function renderCatList(){
       </div>
     </div>`;
   }).join('');
+  document.getElementById('cat-list').innerHTML = shown ? html : `<div class="empty" style="text-align:center;padding:16px;color:var(--muted);font-size:12px">Tidak ada kategori/barang bernama "${catQ}"</div>`;
 }
 
 function updateCatLabel(i,v){cachedSettings.cats[i].label=v;}
@@ -1649,14 +1684,32 @@ function buildFilterBar(){
   document.getElementById('filter-bar').innerHTML=filters.map(f=>`<button class="fpill${f.k===activeFilter?' active':''}" onclick="setFilter('${f.k}')">${f.l}</button>`).join('');
 }
 function setFilter(k){activeFilter=k;buildFilterBar();filterOrders();}
+// ── Isi dropdown Trip & Kurir untuk klasifikasi/audit di halaman Order ──
+function fillOrderClassifyDropdowns(){
+  const selT=document.getElementById('ord-filter-trip'), selK=document.getElementById('ord-filter-kurir');
+  if(!selT||!selK) return;
+  const curT=selT.value, curK=selK.value;
+  const trips=(cachedTrips||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  selT.innerHTML='<option value="">✈️ Semua Trip</option>'+trips.map(t=>`<option value="${t.id}">${t.id} · ${t.route||''} ${t.date?('· '+t.date):''}</option>`).join('');
+  const kuriers=[...new Set(trips.map(t=>t.courier).filter(Boolean))].sort();
+  selK.innerHTML='<option value="">🧑‍✈️ Semua Kurir</option>'+kuriers.map(k=>`<option value="${k}">${k}</option>`).join('');
+  if(curT) selT.value=curT; if(curK) selK.value=curK;
+}
 function filterOrders(){
   if(!document.getElementById('orders-list'))return;
   buildFilterBar();
-  const q=(document.getElementById('ord-search')?.value||'').toLowerCase();
+  const qRaw=(document.getElementById('ord-search')?.value||'').toLowerCase();
+  const fTrip=document.getElementById('ord-filter-trip')?.value||'';
+  const fKurir=document.getElementById('ord-filter-kurir')?.value||'';
   let list=[...cachedOrders];
   if(activeFilter!=='all')list=list.filter(o=>o.status===activeFilter);
-  if(q)list=list.filter(o=>(o.name||'').toLowerCase().includes(q)||(o.code||'').toLowerCase().includes(q));
-  document.getElementById('orders-list').innerHTML=list.length?list.map(o=>orderCardHTML(o)).join(''):'<div class="empty">Tidak ada order</div>';
+  if(fTrip) list=list.filter(o=>o.tripId===fTrip);
+  if(fKurir){
+    const tripIdsForKurir=new Set((cachedTrips||[]).filter(t=>t.courier===fKurir).map(t=>t.id));
+    list=list.filter(o=>tripIdsForKurir.has(o.tripId));
+  }
+  if(qRaw)list=list.filter(o=>(o.name||'').toLowerCase().includes(qRaw)||(o.code||'').toLowerCase().includes(qRaw)||(o.phone||'').replace(/\D/g,'').includes(qRaw.replace(/\D/g,''))||(o.rcvName||'').toLowerCase().includes(qRaw));
+  document.getElementById('orders-list').innerHTML=list.length?list.map(o=>orderCardHTML(o)).join(''):'<div class="empty">Tidak ada order yang cocok dengan filter/pencarian ini</div>';
 }
 
 // ── ORDER MODAL ───────────────────────────────
@@ -2345,6 +2398,9 @@ function setupTripsListener(){
       sel.innerHTML='<option value="all">Semua Trip</option>'+cachedTrips.map(t=>`<option value="${t.id}">${t.id} · ${t.route} · ${fmtDate(t.date)}</option>`).join('');
       sel.value=curVal;
     }
+    // Update klasifikasi Trip/Kurir di halaman Order (utk audit)
+    if(typeof fillOrderClassifyDropdowns==='function') fillOrderClassifyDropdowns();
+    if(typeof fillAnalisisDropdowns==='function') fillAnalisisDropdowns();
     // Re-render trips page if active
     if(document.getElementById('page-trips')?.classList.contains('active')){
       renderTrips();
@@ -3604,10 +3660,26 @@ function refreshCapacityUI(affectedTripId){
   return affectedTripId?tripSlotText(affectedTripId):'';
 }
 function anNormPhone(p){ return String(p||'').replace(/\D/g,''); }
+function fillAnalisisDropdowns(){
+  const selT=document.getElementById('an-trip'), selK=document.getElementById('an-kurir');
+  if(!selT||!selK) return;
+  const curT=selT.value, curK=selK.value;
+  const trips=(cachedTrips||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  selT.innerHTML='<option value="">Semua Trip</option>'+trips.map(t=>`<option value="${t.id}">${t.id} · ${t.route||''} ${t.date?('· '+t.date):''}</option>`).join('');
+  const kuriers=[...new Set(trips.map(t=>t.courier).filter(Boolean))].sort();
+  selK.innerHTML='<option value="">Semua Kurir</option>'+kuriers.map(k=>`<option value="${k}">${k}</option>`).join('');
+  if(curT) selT.value=curT; if(curK) selK.value=curK;
+}
 function anCollect(period){
+  const fTrip=document.getElementById('an-trip')?.value||'';
+  const fKurir=document.getElementById('an-kurir')?.value||'';
+  const tripIdsForKurir=fKurir?new Set((cachedTrips||[]).filter(t=>t.courier===fKurir).map(t=>t.id)):null;
   const src=(cachedOrders||[]).filter(o=>{
     if(o.status==='cancelled') return false;
-    return periodFilter(o.ts||o.createdAt||Date.now(), period);
+    if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return false;
+    if(fTrip && o.tripId!==fTrip) return false;
+    if(tripIdsForKurir && !tripIdsForKurir.has(o.tripId)) return false;
+    return true;
   });
   return src;
 }
@@ -3615,7 +3687,14 @@ function renderAnalisis(){
   const el=document.getElementById('analisis-content'); if(!el) return;
   const period=document.getElementById('an-period')?.value||'all';
   const orders=anCollect(period);
-  const allOrders=(cachedOrders||[]).filter(o=>periodFilter(o.ts||o.createdAt||Date.now(), period));
+  const allOrders=(cachedOrders||[]).filter(o=>{
+    if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return false;
+    const fTrip=document.getElementById('an-trip')?.value||'';
+    const fKurir=document.getElementById('an-kurir')?.value||'';
+    if(fTrip && o.tripId!==fTrip) return false;
+    if(fKurir){ const t=(cachedTrips||[]).find(t=>t.id===o.tripId); if(!t||t.courier!==fKurir) return false; }
+    return true;
+  });
   const cancelled=allOrders.length-orders.length;
   const fmt=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
 
@@ -3893,6 +3972,123 @@ function exportAnalisisCSV(){
   saveCSVFile(csv,'Analisis_Customer_MMBaggage_'+new Date().toISOString().slice(0,10)+'.csv');
 }
 
+// ══════════════════════════════════════════════════
+// 🔍 AUDIT OTOMATIS — deteksi pola yang layak dicek owner
+// Bukan tuduhan pasti, hanya PENANDA pola yang biasanya perlu verifikasi
+// manual: pembayaran tanpa bukti, selisih nominal, override manual,
+// biaya tanpa bukti, barang tambahan admin tanpa catatan, diskon besar
+// tanpa alasan, dan trip dengan biaya tapi tanpa order sama sekali.
+// ══════════════════════════════════════════════════
+function _auditReviewed(){ try{ return JSON.parse(localStorage.getItem('mmb_audit_reviewed')||'{}')||{}; }catch(e){ return {}; } }
+function _auditSaveReviewed(m){ try{ localStorage.setItem('mmb_audit_reviewed', JSON.stringify(m)); }catch(e){} }
+let _auditShowReviewed=false;
+function markAuditReviewed(id){
+  const m=_auditReviewed(); m[id]=Date.now(); _auditSaveReviewed(m);
+  renderPembukuan();
+  toast('✓ Ditandai sudah ditinjau','ok');
+}
+function toggleAuditShowReviewed(){ _auditShowReviewed=!_auditShowReviewed; renderPembukuan(); }
+function runAudit(period){
+  const fmt=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
+  const flags=[];
+  const orders=(cachedOrders||[]).filter(o=>periodFilter(o.ts||o.createdAt||Date.now(), period));
+
+  // A. Ditandai LUNAS tapi tidak ada bukti transfer tersimpan
+  orders.forEach(o=>{
+    if(o.status==='cancelled') return;
+    if(o.payStatus==='lunas'){
+      const p=(cachedPayments||[]).find(x=>x.id===o.id);
+      if(!p || !p.proof) flags.push({id:'A-'+o.id, sev:'high', cat:'Lunas tanpa bukti', msg:`Order ${o.code||o.id} (${o.name||'-'}) ditandai LUNAS tapi tidak ada bukti transfer tersimpan.`});
+    }
+  });
+
+  // B. Nominal dibayar berbeda jauh dari tagihan
+  (cachedPayments||[]).forEach(p=>{
+    if(!periodFilter(p.ts||Date.now(), period)) return;
+    const oo=(cachedOrders||[]).find(o=>o.id===p.orderId); if(!oo || oo.status==='cancelled') return;
+    const tagihan=(oo.totalFinal&&oo.totalFinal>0)?oo.totalFinal:orderRevenue(oo);
+    const diff=(p.amount||0)-tagihan;
+    if(Math.abs(diff)>=1000) flags.push({id:'B-'+p.orderId, sev:'med', cat:'Selisih nominal bayar', msg:`${p.name||p.code||'-'} bayar ${fmt(p.amount||0)} vs tagihan ${fmt(tagihan)} (selisih ${fmt(Math.abs(diff))}).`});
+  });
+
+  // C. Total invoice di-override manual (tidak sama dgn hitungan otomatis item)
+  orders.forEach(o=>{
+    if(o.status==='cancelled') return;
+    if(o.totalFinalOverride) flags.push({id:'C-'+o.id, sev:'med', cat:'Override invoice manual', msg:`Order ${o.code||o.id} (${o.name||'-'}) totalnya di-override manual, tidak sama dengan hitungan otomatis dari item.`});
+  });
+
+  // D. Pengeluaran besar tanpa foto bukti
+  (cachedExpenses||[]).forEach(ex=>{
+    if(!periodFilter(ex.ts||Date.now(), period)) return;
+    if((ex.amount||0)>=200000 && !ex.photo) flags.push({id:'D-'+ex.id, sev:'med', cat:'Biaya besar tanpa bukti', msg:`Pengeluaran "${ex.note||ex.type||'-'}" sebesar ${fmt(ex.amount)} (kurir ${ex.courier||'-'}, trip ${ex.tripId||'-'}) tidak ada foto bukti.`});
+  });
+
+  // E. Barang tambahan admin bernilai besar tanpa catatan spesifik
+  orders.forEach(o=>{
+    if(o.status==='cancelled') return;
+    (o.items||[]).forEach(it=>{
+      if(!it.adminByAdmin || it.status!=='approved') return;
+      const val=((it.actQty!=null?it.actQty:it.qty)||0)*((it.actRate!=null?it.actRate:it.rate)||0);
+      if(val>=300000 && (!it.adminNote || it.adminNote==='Ditambahkan admin saat handling'))
+        flags.push({id:'E-'+o.id+'-'+it.cat, sev:'low', cat:'Barang tambahan admin', msg:`Order ${o.code||o.id}: barang tambahan admin "${it.cat}" senilai ${fmt(val)} tanpa catatan spesifik.`});
+    });
+  });
+
+  // F. Total final jauh di bawah estimasi awal tanpa catatan alasan
+  orders.forEach(o=>{
+    if(o.status==='cancelled') return;
+    if(o.totalFinal>0 && o.totalEst>0){
+      const ratio=o.totalFinal/o.totalEst;
+      if(ratio<0.6 && !(o.statusNote||o.invoiceNote)) flags.push({id:'F-'+o.id, sev:'med', cat:'Diskon besar tanpa catatan', msg:`Order ${o.code||o.id}: total final (${fmt(o.totalFinal)}) jauh di bawah estimasi awal (${fmt(o.totalEst)}) tanpa catatan alasan.`});
+    }
+  });
+
+  // H. Trip dengan biaya tercatat tapi TANPA order sama sekali (potensi trip fiktif)
+  (cachedTrips||[]).forEach(t=>{
+    const tripExpenses=(cachedExpenses||[]).filter(ex=>ex.tripId===t.id).reduce((s,e)=>s+(e.amount||0),0);
+    const tripOrders=(cachedOrders||[]).filter(o=>o.tripId===t.id && o.status!=='cancelled').length;
+    if(tripExpenses>=100000 && tripOrders===0) flags.push({id:'H-'+t.id, sev:'high', cat:'Trip tanpa order', msg:`Trip ${t.id} (${t.route||'-'}, kurir ${t.courier||'-'}) punya biaya tercatat ${fmt(tripExpenses)} tapi tidak ada order sama sekali.`});
+  });
+
+  return flags;
+}
+function auditPanelHTML(flags){
+  const fmt=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
+  const reviewed=_auditReviewed();
+  const active=_auditShowReviewed?flags:flags.filter(f=>!reviewed[f.id]);
+  const sevRank={high:0,med:1,low:2};
+  const sevColor={high:'#D4504A',med:'#D4A017',low:'#4A9FD4'};
+  const sevLabel={high:'🔴 TINGGI',med:'🟡 SEDANG',low:'🔵 RENDAH'};
+  const nHigh=active.filter(f=>f.sev==='high').length, nMed=active.filter(f=>f.sev==='med').length, nLow=active.filter(f=>f.sev==='low').length;
+  let rows;
+  if(!active.length){
+    rows=`<div style="text-align:center;padding:14px;color:#4CAF7D;font-size:12px">✅ Tidak ada pola mencurigakan${(flags.length&&!_auditShowReviewed)?' (atau semua sudah ditinjau)':''}.</div>`;
+  } else {
+    rows=active.slice().sort((a,b)=>sevRank[a.sev]-sevRank[b.sev]).map(f=>`
+      <div style="background:var(--dark4);border-left:3px solid ${sevColor[f.sev]};border-radius:7px;padding:9px 11px;margin-bottom:7px">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:9px;font-weight:800;color:${sevColor[f.sev]};letter-spacing:.5px;margin-bottom:3px">${sevLabel[f.sev]} · ${f.cat}</div>
+            <div style="font-size:11px;color:var(--cream3);line-height:1.5">${f.msg}</div>
+          </div>
+          <button onclick="markAuditReviewed('${f.id}')" style="flex-shrink:0;background:rgba(76,175,125,.12);border:1px solid rgba(76,175,125,.3);color:#4CAF7D;border-radius:6px;padding:4px 8px;font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap">✓ Ditinjau</button>
+        </div>
+      </div>`).join('');
+  }
+  return `<div style="background:linear-gradient(135deg,rgba(212,80,74,.05),#0D0D0D);border:1.5px solid rgba(212,80,74,.3);border-radius:13px;padding:15px;margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px">
+      <div style="font-size:10px;color:#D4504A;text-transform:uppercase;letter-spacing:1px;font-weight:800">🔍 Audit Otomatis</div>
+      <label style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="audit-show-reviewed" ${_auditShowReviewed?'checked':''} onchange="toggleAuditShowReviewed()" style="width:12px;height:12px">Tampilkan yg sudah ditinjau</label>
+    </div>
+    <div style="display:flex;gap:12px;margin-bottom:10px;font-size:10px">
+      <span style="color:#D4504A;font-weight:700">🔴 ${nHigh} Tinggi</span>
+      <span style="color:#D4A017;font-weight:700">🟡 ${nMed} Sedang</span>
+      <span style="color:#4A9FD4;font-weight:700">🔵 ${nLow} Rendah</span>
+    </div>
+    ${rows}
+    <div style="font-size:9px;color:var(--muted);margin-top:8px;line-height:1.5">Ini deteksi otomatis berdasarkan pola data, <strong>bukan tuduhan pasti</strong> — selalu verifikasi manual sebelum mengambil tindakan.</div>
+  </div>`;
+}
 function renderPembukuan(){
   const el=document.getElementById('pembukuan-result');
   if(!el) return;
@@ -3905,7 +4101,7 @@ function renderPembukuan(){
     const c=t.courier||'Tanpa Kurir';
     const dk=tripDisplayKey(t.id);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[]};
   });
 
   // Orders → revenue + komisi affiliate
@@ -3917,7 +4113,7 @@ function renderPembukuan(){
     const c=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
     const dk=tripDisplayKey(o.tripId);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[]};
     const tr=byCourier[c].trips[dk.key];
     const rev=orderRevenue(o);
     const kg=orderKg(o);
@@ -3936,9 +4132,21 @@ function renderPembukuan(){
     const c=ex.courier||'Tanpa Kurir';
     const dk=ex.tripId?tripDisplayKey(ex.tripId):{key:ex.tripId||'-',label:ex.tripId||'-'};
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[]};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[]};
     byCourier[c].trips[dk.key].cost+=(ex.amount||0);
     byCourier[c].trips[dk.key].expenses.push(ex);
+  });
+
+  // ── Bukti TF/Pembayaran → per trip (SAMA seperti pengeluaran) ──
+  // Ini yang membuat "Pembayaran Masuk" rapi per kurir/trip, bukan daftar
+  // panjang tercampur seperti sebelumnya.
+  (cachedPayments||[]).forEach(p=>{
+    if(!periodFilter(p.ts||Date.now(), period)) return;
+    const c=p.courier||'Tanpa Kurir';
+    const dk=p.tripId?tripDisplayKey(p.tripId):{key:p.tripId||'-',label:p.tripId||'-'};
+    if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[]};
+    byCourier[c].trips[dk.key].payments.push(p);
   });
 
   // Compute totals
@@ -4013,6 +4221,7 @@ function renderPembukuan(){
   </div>`;
 
   // PER KURIR
+  h+=auditPanelHTML(runAudit(period));
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff;margin-bottom:12px" onclick="exportPembukuanLengkap()">📁 Simpan Pembukuan Lengkap ke File (CSV)</button>`;
   h+=payH;
   h+=cancelH;
@@ -4027,7 +4236,7 @@ function renderPembukuan(){
         <div style="text-align:right"><div style="font-size:16px;font-weight:900;color:${cd.totalProfit>=0?'#4CAF7D':'#C0392B'}">${fmt(cd.totalProfit)}</div><div style="font-size:9px;color:var(--muted)">profit bersih</div></div>
       </div>`;
     // Per trip breakdown
-    Object.values(cd.trips).filter(tr=>tr.orders>0||tr.expenses.length).forEach(tr=>{
+    Object.values(cd.trips).filter(tr=>tr.orders>0||tr.expenses.length||tr.payments.length).forEach(tr=>{
       const profit=tr.rev-tr.cost-tr.comm;
       h+=`<div style="background:var(--dark4);border-radius:9px;padding:11px;margin-bottom:7px">
         <div style="font-size:12px;font-weight:700;color:var(--cream);margin-bottom:6px">✈️ ${tr.tripId} ${tr.date?('· '+tr.date):''}<br><span style="font-size:10px;color:var(--muted);font-weight:400">${tr.route}</span></div>
@@ -4037,6 +4246,20 @@ function renderPembukuan(){
           <div style="display:flex;justify-content:space-between"><span>🤝 Komisi Affiliate</span><span style="color:#4A9FD4">-${fmt(tr.comm)}</span></div>
           <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:800"><span>✨ Profit Trip</span><span style="color:${profit>=0?'#4CAF7D':'#C0392B'}">${fmt(profit)}</span></div>
         </div>`;
+      // Pembayaran Masuk (bukti TF) khusus trip ini — rapi per trip/kurir
+      if(tr.payments.length){
+        const tIn=tr.payments.reduce((s,p)=>s+(p.amount||0),0);
+        h+=`<div style="margin-top:8px;padding-top:7px;border-top:1px dashed var(--border)">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:#4CAF7D;font-weight:700;margin-bottom:4px"><span>💵 Pembayaran Masuk (${tr.payments.length})</span><span>${fmt(tIn)}</span></div>`;
+        tr.payments.slice().sort((a,b)=>(b.ts||0)-(a.ts||0)).forEach(p=>{
+          const oo=(cachedOrders||[]).find(x=>x.id===p.orderId);
+          const rev=oo?Math.round(orderRevenue(oo)):null;
+          const mismatch=(rev!=null && Math.abs(rev-(p.amount||0))>=1000);
+          const proofBtn=p.proof?`<button onclick="bukaFotoPayment('${p.orderId}')" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷</button> <button onclick="unduhBuktiPayment('${p.orderId}')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">⬇</button>`:'<span style="font-size:9px;color:#D4504A">no proof</span>';
+          h+=`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:3px 0"><span>• ${p.name||p.code||'-'}${mismatch?' <span style="color:#E8924A">⚠️</span>':''} <span style="opacity:.6">(${p.method||''}${p.date?(' · '+p.date):''})</span></span><span style="display:flex;align-items:center;gap:6px"><span style="color:#4CAF7D;font-weight:700">${fmt(p.amount||0)}</span>${proofBtn}</span></div>`;
+        });
+        h+=`</div>`;
+      }
       // Detail expenses
       if(tr.expenses.length){
         h+=`<div style="margin-top:6px;font-size:10px;color:var(--muted)">Rincian biaya:</div>`;
