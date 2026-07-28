@@ -282,7 +282,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v21 · bagi hasil investor</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v22 · laporan profesional investor</div>
     <div id="trips-list"></div>
   </div>
 
@@ -4589,6 +4589,8 @@ function renderPembukuan(){
   h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:var(--gold);letter-spacing:1.5px">💵 LAPORAN 3 · REKAPITULASI ARUS KAS</div></div>`;
   h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:10px;line-height:1.5">Laporan ini untuk mencocokkan dengan mutasi rekening bank — total uang yang BENAR-BENAR masuk (bukti TF), gabungan bagasi + cukai.</div>`;
 
+  h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#D4A017,#8B6914);color:#1a1508;font-weight:800;margin-bottom:8px" onclick="exportLaporanProfesional()">📊 Export Laporan Profesional (untuk Investor)${hasSpecificFilter?' — '+(fKurir||fRute):''}</button>`;
+  h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Laporan rapi & siap diserahkan: tanpa transaksi batal, ada bagi hasil investor (jika ada), analisis per trip, dan total keseluruhan di akhir. ${hasSpecificFilter?'Cakupan ikut filter Kurir/Rute di atas.':'Pilih Kurir/Rute di atas dulu untuk mempersempit cakupan laporan.'}</div>`;
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff;margin-bottom:12px" onclick="exportPembukuanLengkap()">📁 Simpan Pembukuan Lengkap ke File (CSV)</button>`;
   h+=payH;
   h+=cancelH;
@@ -5885,6 +5887,213 @@ function exportPembukuanLengkap(){
   L.push(['Margin (%)', tRevenue>0?Math.round(profit/tRevenue*100):0]);
   const csv=L.map(r=>r.map(esc).join(',')).join('\n');
   saveCSVFile(csv,'MMBaggage_Pembukuan_Lengkap_'+new Date().toISOString().slice(0,10)+'.csv');
+}
+
+// ══════════════════════════════════════════════════
+// 📊 LAPORAN PROFESIONAL — untuk diserahkan ke investor/pihak luar.
+// BEDA dari exportPembukuanLengkap (dump lengkap utk audit internal):
+//   • HANYA transaksi nyata — order batal TIDAK ikut sama sekali
+//   • Bisa dipersempit ke satu Kurir atau satu Rute (pakai filter yg sama
+//     dengan tampilan layar Pembukuan — supaya "apa yang dilihat = apa yang
+//     diekspor", bukan filter terpisah yang bisa membingungkan)
+//   • Bagi hasil investor ditampilkan eksplisit (potensial & terkonfirmasi)
+//   • Analisis ringkas per trip/rute
+//   • TOTAL KESELURUHAN (uang masuk vs keluar) di baris paling akhir
+//   • Format rapi dgn garis pemisah tegas — layak dibaca pihak luar
+// ══════════════════════════════════════════════════
+function exportLaporanProfesional(){
+  const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
+  const fKurir=document.getElementById('pemb-filter-kurir')?.value||'';
+  const fRute=document.getElementById('pemb-filter-rute')?.value||'';
+  const periodLabel={all:'Semua Waktu',month:'Bulan Ini','30':'30 Hari Terakhir'}[period]||period;
+  const scopeLabel = fKurir&&fRute ? `Kurir ${fKurir} · Rute ${fRute}` : fKurir ? `Kurir ${fKurir}` : fRute ? `Rute ${fRute}` : 'Semua Kurir & Rute';
+
+  const allowedTripIds=new Set((cachedTrips||[])
+    .filter(t=>(!fKurir||t.courier===fKurir) && (!fRute||t.route===fRute))
+    .map(t=>t.id));
+
+  const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+  const frp=n=>'Rp '+Math.round(n||0).toLocaleString('id-ID');
+  const L=[];
+  const garis=()=>L.push(['════════════════════════════════════════════════════════════════']);
+  const garisTipis=()=>L.push(['────────────────────────────────────────────────────────────────']);
+
+  // ── ORDER dalam cakupan, HANYA transaksi nyata (order batal tidak ikut) ──
+  const orders=(cachedOrders||[]).filter(o=>{
+    if(o.status==='cancelled') return false;
+    if(!o.tripId || !allowedTripIds.has(o.tripId)) return false;
+    if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return false;
+    return true;
+  });
+  const pays=(cachedPayments||[]).filter(p=>p.tripId && allowedTripIds.has(p.tripId) && periodFilter(p.ts||Date.now(), period));
+  const expsAll=(cachedExpenses||[]).filter(e=>e.tripId && allowedTripIds.has(e.tripId) && periodFilter(e.ts||Date.now(), period));
+  const expsBagasi=expsAll.filter(e=>e.type!=='cukai');
+  const expsCukai=expsAll.filter(e=>e.type==='cukai');
+  const payByOrder={}; pays.forEach(p=>{ payByOrder[p.orderId]=p; });
+
+  // ── LETTERHEAD ──
+  garis();
+  L.push(['M.M BAGGAGE — LAPORAN KEUANGAN']);
+  garis();
+  L.push(['Cakupan Laporan', scopeLabel]);
+  L.push(['Periode', periodLabel]);
+  L.push(['Tanggal Diterbitkan', new Date().toLocaleString('id-ID')]);
+  L.push(['Rute Layanan', 'Cairo ↔ Jakarta']);
+  garis();
+  L.push([]);
+
+  // ── RINGKASAN EKSEKUTIF ──
+  let tRev=0, tRevPaid=0, tKg=0, tComm=0, tCommPaid=0;
+  orders.forEach(o=>{
+    const rev=orderRevenue(o); const kg=orderKg(o);
+    tRev+=rev; tKg+=kg;
+    if(o.payStatus==='lunas') tRevPaid+=rev;
+    if(o.referral&&o.referral.code){
+      const c=(parseFloat(o.referral.commissionPerKg)||0)*kg;
+      tComm+=c; if(o.payStatus==='lunas') tCommPaid+=c;
+    }
+  });
+  const tCostBagasi=expsBagasi.reduce((s,e)=>s+(e.amount||0),0);
+  const tCukaiIn=orders.reduce((s,o)=>s+(o.cukaiAmount||0),0);
+  const tCukaiOut=expsCukai.reduce((s,e)=>s+(e.amount||0),0);
+  const profitPotensial=tRev-tCostBagasi-tComm;
+  const profitTerkonfirmasi=tRevPaid-tCostBagasi-tCommPaid;
+  const nLunas=orders.filter(o=>o.payStatus==='lunas').length;
+
+  L.push(['RINGKASAN EKSEKUTIF']);
+  garisTipis();
+  L.push(['Jumlah Transaksi (tidak termasuk batal)', orders.length]);
+  L.push(['  · Sudah Lunas', nLunas]);
+  L.push(['  · Belum Lunas', orders.length-nLunas]);
+  L.push(['Total Berat Aktual', tKg.toFixed(1)+' kg']);
+  L.push([]);
+  L.push(['Omzet/Revenue Bagasi', frp(tRev)]);
+  L.push(['Modal & Biaya (di luar cukai)', frp(tCostBagasi)]);
+  L.push(['Komisi Affiliate', frp(tComm)]);
+  L.push(['PROFIT BERSIH BAGASI (Potensial)', frp(profitPotensial)]);
+  L.push(['Margin', (tRev>0?Math.round(profitPotensial/tRev*100):0)+'%']);
+  L.push([]);
+  L.push(['PROFIT BERSIH BAGASI (Terkonfirmasi/Lunas)', frp(profitTerkonfirmasi)]);
+  L.push(['Margin Terkonfirmasi', (tRevPaid>0?Math.round(profitTerkonfirmasi/tRevPaid*100):0)+'%']);
+  L.push([]);
+  L.push(['Cukai Masuk (dari customer, via Invoice/Kelola)', frp(tCukaiIn)]);
+  L.push(['Cukai Keluar (ditalangi ke bea cukai)', frp(tCukaiOut)]);
+  L.push(['Selisih Cukai', frp(tCukaiIn-tCukaiOut)]);
+  garis();
+  L.push([]);
+
+  // ── BAGI HASIL INVESTOR (kalau ada trip investor dalam cakupan) ──
+  const investorTripsInScope=(cachedTrips||[]).filter(t=>allowedTripIds.has(t.id) && t.investorEnabled);
+  if(investorTripsInScope.length){
+    L.push(['BAGI HASIL INVESTOR']);
+    garisTipis();
+    investorTripsInScope.forEach(t=>{
+      const tOrders=orders.filter(o=>o.tripId===t.id);
+      const rev=tOrders.reduce((s,o)=>s+orderRevenue(o),0);
+      const revPaid=tOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+orderRevenue(o),0);
+      const cost=expsBagasi.filter(e=>e.tripId===t.id).reduce((s,e)=>s+(e.amount||0),0);
+      const comm=tOrders.reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
+      const commPaid=tOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
+      const pProfit=rev-cost-comm, pConfirmed=revPaid-cost-commPaid;
+      const pct=t.investorPercent||0;
+      L.push(['Trip', t.id+' · '+(t.route||'')+' · '+(t.date||'')]);
+      L.push(['Nama Investor', t.investorName||'(belum diisi)']);
+      L.push(['Persentase Investor', pct+'%']);
+      L.push(['Profit Trip (Potensial)', frp(pProfit)]);
+      L.push(['  → Bagian Investor', frp(pProfit*(pct/100))]);
+      L.push(['  → Bagian Owner', frp(pProfit-pProfit*(pct/100))]);
+      L.push(['Profit Trip (Terkonfirmasi/Lunas)', frp(pConfirmed)]);
+      L.push(['  → Bagian Investor', frp(pConfirmed*(pct/100))]);
+      L.push(['  → Bagian Owner', frp(pConfirmed-pConfirmed*(pct/100))]);
+      garisTipis();
+    });
+    L.push([]);
+  }
+
+  // ── RINCIAN TRANSAKSI (order batal TIDAK disertakan) ──
+  L.push(['RINCIAN TRANSAKSI']);
+  garisTipis();
+  L.push(['Kode','Nama Customer','Rute','Trip','Tanggal','Berat (kg)','Tagihan (Rp)','Status Bayar','Cukai (Rp)','Status Pengambilan']);
+  orders.forEach(o=>{
+    const kg=orderKg(o); const tagihan=(o.totalFinal&&o.totalFinal>0)?o.totalFinal:orderRevenue(o);
+    L.push([o.code||o.id, o.name||'', o.route||'', o.tripId||'', (o.ts?new Date(o.ts).toLocaleDateString('id-ID'):''),
+      kg.toFixed(1), frp(tagihan), o.payStatus==='lunas'?'Lunas':o.payStatus==='dp'?'DP/Sebagian':'Belum Bayar',
+      frp(o.cukaiAmount||0), o.pickupStatus==='sudah'?'Sudah Diambil':'Belum Diambil']);
+  });
+  garisTipis();
+  L.push([]);
+
+  // ── PEMBAYARAN MASUK (BUKTI TF) ──
+  if(pays.length){
+    L.push(['PEMBAYARAN MASUK (BUKTI TF)']);
+    garisTipis();
+    L.push(['Kode','Nama','Tanggal','Metode','Nominal (Rp)']);
+    let tCashIn=0;
+    pays.forEach(p=>{ tCashIn+=(p.amount||0); L.push([p.code||p.orderId, p.name||'', p.date||'', p.method||'', frp(p.amount||0)]); });
+    garisTipis();
+    L.push(['TOTAL PEMBAYARAN MASUK', frp(tCashIn)]);
+    L.push([]);
+  }
+
+  // ── PENGELUARAN (DI LUAR CUKAI) ──
+  if(expsBagasi.length){
+    L.push(['PENGELUARAN (DI LUAR CUKAI)']);
+    garisTipis();
+    L.push(['Trip','Jenis','Catatan','Nominal (Rp)']);
+    expsBagasi.forEach(e=>L.push([e.tripId||'', e.type||'', e.note||'', frp(e.amount||0)]));
+    garisTipis();
+    L.push(['TOTAL PENGELUARAN', frp(tCostBagasi)]);
+    L.push([]);
+  }
+
+  // ── CUKAI DITALANGI ──
+  if(expsCukai.length){
+    L.push(['CUKAI DITALANGI']);
+    garisTipis();
+    L.push(['Trip','Catatan','Nominal (Rp)']);
+    expsCukai.forEach(e=>L.push([e.tripId||'', e.note||'', frp(e.amount||0)]));
+    garisTipis();
+    L.push(['TOTAL CUKAI DITALANGI', frp(tCukaiOut)]);
+    L.push([]);
+  }
+
+  // ── ANALISIS PER TRIP/RUTE ──
+  L.push(['ANALISIS PER TRIP/RUTE']);
+  garisTipis();
+  L.push(['Trip','Rute','Kurir','Jml Order','Berat (kg)','Revenue (Rp)','Profit (Rp)','Margin (%)']);
+  const byTripAnalysis={};
+  orders.forEach(o=>{
+    const k=o.tripId||'-';
+    byTripAnalysis[k]=byTripAnalysis[k]||{route:o.route||'', courier:'', count:0, kg:0, rev:0};
+    const trip=(cachedTrips||[]).find(t=>t.id===k);
+    byTripAnalysis[k].courier=trip?(trip.courier||''):'';
+    byTripAnalysis[k].count++; byTripAnalysis[k].kg+=orderKg(o); byTripAnalysis[k].rev+=orderRevenue(o);
+  });
+  Object.entries(byTripAnalysis).forEach(([tid,d])=>{
+    const tripCost=expsBagasi.filter(e=>e.tripId===tid).reduce((s,e)=>s+(e.amount||0),0);
+    const tripProfit=d.rev-tripCost;
+    L.push([tid, d.route, d.courier, d.count, d.kg.toFixed(1), frp(d.rev), frp(tripProfit), (d.rev>0?Math.round(tripProfit/d.rev*100):0)+'%']);
+  });
+  garisTipis();
+  L.push([]);
+
+  // ── TOTAL KESELURUHAN (BOTTOM LINE) ──
+  const totalMasuk=pays.reduce((s,p)=>s+(p.amount||0),0);
+  const totalKeluar=tCostBagasi+tCukaiOut;
+  garis();
+  L.push(['TOTAL KESELURUHAN (RINGKASAN AKHIR)']);
+  garis();
+  L.push(['TOTAL UANG MASUK (Bukti TF diterima)', frp(totalMasuk)]);
+  L.push(['TOTAL UANG KELUAR (Biaya + Cukai Ditalangi)', frp(totalKeluar)]);
+  L.push(['SELISIH BERSIH (ARUS KAS)', frp(totalMasuk-totalKeluar)]);
+  garis();
+  L.push([]);
+  L.push(['Laporan ini dibuat otomatis oleh sistem M.M Baggage dan mencerminkan data pada saat diterbitkan.']);
+  L.push(['Order yang dibatalkan tidak disertakan dalam laporan ini.']);
+
+  const csv=L.map(r=>r.map(esc).join(',')).join('\n');
+  const scopeSlug=(fKurir||fRute||'Semua').replace(/[^a-zA-Z0-9]/g,'');
+  saveCSVFile(csv,'MMBaggage_Laporan_Investor_'+scopeSlug+'_'+new Date().toISOString().slice(0,10)+'.csv');
 }
 
 // ── EXPORT CSV (order ringkas) ────────────────
