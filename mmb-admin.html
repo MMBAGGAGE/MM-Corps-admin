@@ -282,7 +282,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v22 · laporan profesional investor</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v23 · rekap 3 laporan & belum masuk</div>
     <div id="trips-list"></div>
   </div>
 
@@ -4559,16 +4559,32 @@ function renderPembukuan(){
   h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:#4A9FD4;letter-spacing:1.5px">🛂 LAPORAN 2 · CUKAI</div></div>`;
 
   const cukaiSelisih=grandCukaiIn-grandCukaiOut;
+  // REALTIME: cukai yg BENAR-BENAR sudah diterima via bukti TF (bukan sekadar
+  // ditagih di invoice). Dihitung dari tr.payments yang SUDAH ikut filter
+  // kurir/rute yang sama — supaya konsisten dgn seluruh laporan di halaman ini.
+  let grandCukaiInRealtime=0, grandBagasiInRealtime=0;
+  Object.values(byCourier).forEach(cd=>{
+    Object.values(cd.trips).forEach(tr=>{
+      tr.payments.forEach(p=>{
+        const oo=(cachedOrders||[]).find(o=>o.id===p.orderId);
+        const sp=paymentSplit(p,oo);
+        grandCukaiInRealtime+=sp.cukai; grandBagasiInRealtime+=sp.baggage;
+      });
+    });
+  });
+  const cukaiRealtimeMatch=Math.abs(grandCukaiIn-grandCukaiInRealtime)<1000;
   h+=`<div style="background:var(--bg2);border:1.5px solid rgba(74,159,212,.3);border-radius:13px;padding:14px;margin-bottom:12px">
     <div style="font-size:10px;color:#4A9FD4;text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:8px">🛂 Cukai — Bea Cukai/Pajak (titipan, bukan profit)</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk (dari customer, via Invoice/Kelola)</div><div style="font-size:13px;font-weight:800;color:#4CAF7D">${fmt(grandCukaiIn)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk — Potensi (ditagih via Invoice/Kelola)</div><div style="font-size:13px;font-weight:800;color:var(--cream)">${fmt(grandCukaiIn)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk — Realtime (sudah diterima)</div><div style="font-size:13px;font-weight:800;color:${cukaiRealtimeMatch?'#4CAF7D':'#D4A017'}">${fmt(grandCukaiInRealtime)}</div></div>
+    </div>
+    ${!cukaiRealtimeMatch?`<div style="font-size:10px;color:#D4A017;margin-top:6px">⚠️ Selisih ${fmt(grandCukaiIn-grandCukaiInRealtime)} — cukai yang ditagih tapi belum diterima customer</div>`:`<div style="font-size:10px;color:#4CAF7D;margin-top:6px">✅ Realtime = Potensi — semua cukai yang ditagih sudah diterima</div>`}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
       <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📤 Keluar (ditalangi ke bea cukai)</div><div style="font-size:13px;font-weight:800;color:#E8924A">${fmt(grandCukaiOut)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Selisih (Potensi Masuk − Keluar)</div><div style="font-size:13px;font-weight:800;color:${cukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(cukaiSelisih))}</div></div>
     </div>
-    <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px;font-size:11px;color:var(--muted)">
-      Selisih: <strong style="color:${cukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(cukaiSelisih))}</strong> ${cukaiSelisih>=0?'— cukai dari customer SUDAH menutupi/lebih dari yang ditalangi ✅':'— YANG DITALANGI LEBIH BESAR dari yang diterima ⚠️ (ada order belum bayar cukai penuh)'}
-    </div>
-    <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">📥 Otomatis dari kolom Cukai/Pajak di Kelola &amp; Invoice tiap order — TIDAK bisa diinput manual di sini (sumber kebenarannya invoice). 📤 Diinput manual di bawah setiap kali admin membayar/menalangi cukai.</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">📥 Potensi = otomatis dari kolom Cukai/Pajak di Kelola &amp; Invoice. Realtime = dihitung dari bukti TF yang benar-benar tersimpan. 📤 Keluar diinput manual setiap kali admin menalangi cukai.</div>
   </div>`;
 
   // 🛂 INPUT CUKAI CEPAT — supaya admin tidak perlu pindah ke menu Pengeluaran
@@ -4588,6 +4604,18 @@ function renderPembukuan(){
   // ══════════════════════════════════════════════════
   h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:var(--gold);letter-spacing:1.5px">💵 LAPORAN 3 · REKAPITULASI ARUS KAS</div></div>`;
   h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:10px;line-height:1.5">Laporan ini untuk mencocokkan dengan mutasi rekening bank — total uang yang BENAR-BENAR masuk (bukti TF), gabungan bagasi + cukai.</div>`;
+
+  // TOTAL BELUM MASUK — gabungan bagasi+cukai yang sudah ditagih tapi belum
+  // benar-benar diterima. Kalau 0, semua uang yang seharusnya masuk SUDAH masuk.
+  const belumMasukBagasiP=Math.max(0,grandRev-grandBagasiInRealtime);
+  const belumMasukCukaiP=Math.max(0,grandCukaiIn-grandCukaiInRealtime);
+  const totalBelumMasukP=belumMasukBagasiP+belumMasukCukaiP;
+  h+=`<div class="sec-card" style="margin-bottom:14px;border:1.5px solid ${totalBelumMasukP<1000?'rgba(76,175,125,.4)':'rgba(212,80,74,.4)'}">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${totalBelumMasukP<1000?'#4CAF7D':'#D4504A'};letter-spacing:1px;margin-bottom:10px">${totalBelumMasukP<1000?'✅ Semua Uang Sudah Masuk Rekening':'⚠️ TOTAL BELUM MASUK REKENING'}</div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--cream3);margin-bottom:4px"><span>🎒 Bagasi belum masuk</span><span style="font-weight:700;color:${belumMasukBagasiP<1000?'#4CAF7D':'#D4A017'}">${fmt(belumMasukBagasiP)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--cream3);margin-bottom:6px"><span>🛂 Cukai belum masuk</span><span style="font-weight:700;color:${belumMasukCukaiP<1000?'#4CAF7D':'#D4A017'}">${fmt(belumMasukCukaiP)}</span></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:6px"><span style="font-weight:700;font-size:12px">TOTAL BELUM MASUK</span><span style="font-weight:900;font-size:15px;color:${totalBelumMasukP<1000?'#4CAF7D':'#D4504A'}">${fmt(totalBelumMasukP)}</span></div>
+  </div>`;
 
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#D4A017,#8B6914);color:#1a1508;font-weight:800;margin-bottom:8px" onclick="exportLaporanProfesional()">📊 Export Laporan Profesional (untuk Investor)${hasSpecificFilter?' — '+(fKurir||fRute):''}</button>`;
   h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Laporan rapi & siap diserahkan: tanpa transaksi batal, ada bagi hasil investor (jika ada), analisis per trip, dan total keseluruhan di akhir. ${hasSpecificFilter?'Cakupan ikut filter Kurir/Rute di atas.':'Pilih Kurir/Rute di atas dulu untuk mempersempit cakupan laporan.'}</div>`;
@@ -4638,17 +4666,24 @@ function renderPembukuan(){
             </div>
           </div>`;
         })():''}
-        ${(tr.cukaiIn||tr.cukaiOut)?`<div style="background:rgba(74,159,212,.06);border:1px solid rgba(74,159,212,.2);border-radius:8px;padding:9px;margin-bottom:7px">
+        ${(tr.cukaiIn||tr.cukaiOut)?(function(){
+          let cukaiInRt=0;
+          tr.payments.forEach(p=>{ const oo=(cachedOrders||[]).find(o=>o.id===p.orderId); cukaiInRt+=paymentSplit(p,oo).cukai; });
+          const rtMatch=Math.abs(tr.cukaiIn-cukaiInRt)<1000;
+          return `<div style="background:rgba(74,159,212,.06);border:1px solid rgba(74,159,212,.2);border-radius:8px;padding:9px;margin-bottom:7px">
           <div style="font-size:9px;font-weight:800;color:#4A9FD4;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🛂 Cukai — titipan customer, bukan profit</div>
           <div style="font-size:11px;color:var(--cream3);line-height:1.7">
-            <div style="display:flex;justify-content:space-between"><span>Masuk / Keluar</span><span>${fmt(tr.cukaiIn)} / ${fmt(tr.cukaiOut)}</span></div>
-            <div style="display:flex;justify-content:space-between;font-weight:800;border-top:1px solid var(--border);margin-top:4px;padding-top:4px"><span>Selisih</span><span style="color:${tripCukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(tripCukaiSelisih))}</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Masuk — Potensi</span><span>${fmt(tr.cukaiIn)}</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Masuk — Realtime (diterima)</span><span style="color:${rtMatch?'#4CAF7D':'#D4A017'}">${fmt(cukaiInRt)}</span></div>
+            <div style="display:flex;justify-content:space-between"><span>Keluar (ditalangi)</span><span>${fmt(tr.cukaiOut)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-weight:800;border-top:1px solid var(--border);margin-top:4px;padding-top:4px"><span>Selisih (Potensi−Keluar)</span><span style="color:${tripCukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(tripCukaiSelisih))}</span></div>
           </div>
           ${tr.cukaiExpenses&&tr.cukaiExpenses.length?`<div style="margin-top:6px;font-size:9px;color:var(--muted)">Rincian cukai yang ditalangi:</div>${tr.cukaiExpenses.map(ex=>{
             const photoBtn=ex.photo?`<button onclick="bukaFotoExpense('${ex.id}')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:2px 7px;font-size:9px;font-weight:700;cursor:pointer">📷</button>`:'';
             return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:2px 0"><span>• ${ex.note||'Cukai'}${ex.tripId?(' ('+ex.tripId+')'):''}</span><span style="display:flex;gap:5px;align-items:center">${fmt(ex.amount)}${photoBtn}</span></div>`;
           }).join('')}`:''}
-        </div>`:''}`;
+        </div>`;
+        })():''}`;
       // Rincian barang: berat, harga, & kelengkapan foto — utk transparansi & pengawasan admin
       if(tr.itemsDetail.length){
         const dKey=cd.courier+'|'+tr.tripId;
@@ -5639,12 +5674,20 @@ async function renderRekap(){
   const tf=sel?.value||'all';
   let orders=cachedOrders.filter(o=>o.status!=='cancelled');
   if(tf!=='all')orders=orders.filter(o=>o.tripId===tf);
-  const delivered=orders.filter(o=>o.status==='delivered');
-  const totalRev=delivered.reduce((s,o)=>s+orderRevenue(o),0);
-  const totalKg=delivered.reduce((s,o)=>s+orderKg(o),0);
+  // ── PERBAIKAN: sebelumnya breakdown di sini HANYA menghitung order
+  // berstatus 'delivered' — beda cakupan dari Pembukuan yang menghitung
+  // SEMUA order aktif (non-cancelled). Inilah sumber selisih angka cukai
+  // yang ditemukan antara Rekap & Pembukuan. Sekarang disamakan: base
+  // scope-nya "orders" (semua non-cancelled) = POTENSI, sama seperti
+  // Pembukuan. "delivered"/lunas dipakai KHUSUS utk angka REALTIME.
+  const paidOrders=orders.filter(o=>o.payStatus==='lunas');
+  const totalRev=orders.reduce((s,o)=>s+orderRevenue(o),0); // POTENSI
+  const totalRevRealtime=paidOrders.reduce((s,o)=>s+orderRevenue(o),0); // REALTIME (sudah lunas)
+  const totalKg=orders.reduce((s,o)=>s+orderKg(o),0);
+  const nDelivered=orders.filter(o=>o.status==='delivered').length; // metrik operasional (bukan finansial)
   const byTrip={};const byCat={};const byRoute={};
   let nItemsTotal=0, nMissingCustPhoto=0, nMissingScalePhoto=0, nWeightDiff=0;
-  delivered.forEach(o=>{
+  orders.forEach(o=>{
     const tid=o.tripId||'Manual';
     byTrip[tid]=byTrip[tid]||{count:0,rev:0,kg:0,cukaiIn:0,route:o.route||'-'};
     byTrip[tid].count++;byTrip[tid].rev+=orderRevenue(o);
@@ -5665,22 +5708,64 @@ async function renderRekap(){
       if(declared>0 && Math.abs(actual-declared)/declared>=0.15) nWeightDiff++;
     });
   });
-  // Cukai keluar (bea cukai/pajak aktual dibayar) — ikut filter trip yang sama
-  const cukaiIn=delivered.reduce((s,o)=>s+(o.cukaiAmount||0),0);
+  // Cukai — POTENSI (semua order, dari Kelola/Invoice) vs REALTIME (yang
+  // BENAR-BENAR sudah diterima via bukti TF, dipecah pakai paymentSplit —
+  // fungsi yg sama dipakai di Pembukuan, jadi kedua halaman selalu konsisten).
+  const cukaiIn=orders.reduce((s,o)=>s+(o.cukaiAmount||0),0); // POTENSI
+  const paysInScope=(cachedPayments||[]).filter(p=>tf==='all'||p.tripId===tf);
+  let cukaiInRealtime=0, bagasiInRealtime=0;
+  paysInScope.forEach(p=>{ const oo=orders.find(o=>o.id===p.orderId); const sp=paymentSplit(p,oo); cukaiInRealtime+=sp.cukai; bagasiInRealtime+=sp.baggage; });
   const cukaiExpenses=(cachedExpenses||[]).filter(ex=>ex.type==='cukai' && (tf==='all' || ex.tripId===tf));
-  const cukaiOut=cukaiExpenses.reduce((s,ex)=>s+(ex.amount||0),0);
+  const cukaiOut=cukaiExpenses.reduce((s,ex)=>s+(ex.amount||0),0); // Potensi = Realtime (dicatat saat benar² terjadi)
+  const revMatch=Math.abs(totalRev-totalRevRealtime)<1000;
+  const cukaiMatch=Math.abs(cukaiIn-cukaiInRealtime)<1000;
+  const semuaBeres=revMatch&&cukaiMatch;
+  // ── TOTAL BELUM MASUK — gabungan bagasi+cukai yang sudah ditagih tapi
+  // belum benar-benar diterima. Ini angka yang owner pakai utk cek arus kas
+  // rekening: kalau 0, semua uang yang seharusnya masuk SUDAH masuk.
+  const belumMasukBagasi=Math.max(0,totalRev-totalRevRealtime);
+  const belumMasukCukai=Math.max(0,cukaiIn-cukaiInRealtime);
+  const totalBelumMasuk=belumMasukBagasi+belumMasukCukai;
+
   el.innerHTML=`
+    <div class="rek-card" style="margin-bottom:10px;border:1.5px solid ${semuaBeres?'rgba(76,175,125,.4)':'rgba(212,160,23,.4)'}">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${semuaBeres?'#4CAF7D':'#D4A017'};letter-spacing:1px">${semuaBeres?'✅ Realtime = Potensi — Semua Beres':'⚠️ Realtime ≠ Potensi — Ada yang Belum Settle'}</div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-      <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Revenue</div><div style="font-family:'Space Mono',monospace;font-size:14px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${fmtRp(totalRev)}</div></div>
       <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Total Berat</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${totalKg.toFixed(1)} kg</div></div>
-      <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Selesai</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${delivered.length}</div></div>
-      <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Aktif</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${orders.filter(o=>o.status!=='delivered').length}</div></div>
+      <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Order (aktif)</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${orders.length}</div></div>
+      <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">✅ Selesai (Lunas+Diambil)</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${nDelivered}</div></div>
+      <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">🕓 Belum Lunas</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${orders.length-paidOrders.length}</div></div>
+    </div>
+
+    <div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:var(--gold3);letter-spacing:1.5px">📦 LAPORAN 1 · BAGASI</div></div>
+    <div class="rek-card" style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">💰 Revenue — Potensi vs Realtime</div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">Potensi (semua order)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px">${fmtRp(totalRev)}</span></div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">Realtime (sudah lunas)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${revMatch?'#4CAF7D':'#D4A017'}">${fmtRp(totalRevRealtime)}</span></div>
+      ${!revMatch?`<div style="font-size:10px;color:#D4A017;margin-top:3px">↳ Belum masuk: ${fmtRp(belumMasukBagasi)} — order yang belum lunas</div>`:'<div style="font-size:10px;color:#4CAF7D;margin-top:3px">✅ Semua omzet bagasi sudah diterima</div>'}
     </div>
     <div class="rek-card" style="margin-bottom:8px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4A9FD4;letter-spacing:1px;margin-bottom:10px">🛂 Cukai (Bea Cukai/Pajak)</div>
-      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk (dari customer)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#4CAF7D">${fmtRp(cukaiIn)}</span></div>
-      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📤 Keluar (ke bea cukai)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#E8924A">${fmtRp(cukaiOut)}</span></div>
-      <div class="rek-row" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><span style="color:var(--muted);font-size:11px">Selisih</span><span style="font-weight:800;font-family:'Space Mono',monospace;font-size:12px;color:${(cukaiIn-cukaiOut)>=0?'#4CAF7D':'#C0392B'}">${fmtRp(Math.abs(cukaiIn-cukaiOut))}</span></div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Trip / Kurir</div>
+      ${Object.entries(byTrip).map(([t,d])=>`<div class="rek-row"><div><div style="color:var(--cream3);font-size:12px">${t} <span style="color:var(--muted);font-weight:400">· ${d.route}</span></div><div style="font-size:10px;color:var(--muted)">${d.count} order · <strong style="color:var(--cream3)">${d.kg.toFixed(1)} kg</strong>${d.cukaiIn?(' · cukai '+fmtRp(d.cukaiIn)):''}</div></div><div style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(d.rev)}</div></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
+    </div>
+    <div class="rek-card" style="margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Rute</div>
+      ${Object.entries(byRoute).map(([r,v])=>`<div class="rek-row"><span style="color:var(--cream3);font-size:12px">${r}</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(v)}</span></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
+    </div>
+    <div class="rek-card" style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Kategori</div>
+      ${Object.entries(byCat).map(([cat,d])=>`<div class="rek-row"><div><div style="color:var(--cream3);font-size:12px">${cat}</div><div style="font-size:10px;color:var(--muted)">${d.count} order · ${d.kg.toFixed(1)} kg</div></div><div style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(d.rev)}</div></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
+    </div>
+
+    <div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:#4A9FD4;letter-spacing:1.5px">🛂 LAPORAN 2 · CUKAI</div></div>
+    <div class="rek-card" style="margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4A9FD4;letter-spacing:1px;margin-bottom:10px">🛂 Cukai — Potensi vs Realtime vs Keluar</div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk — Potensi (ditagih)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px">${fmtRp(cukaiIn)}</span></div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk — Realtime (diterima)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${cukaiMatch?'#4CAF7D':'#D4A017'}">${fmtRp(cukaiInRealtime)}</span></div>
+      ${!cukaiMatch?`<div style="font-size:10px;color:#D4A017;margin-top:3px">↳ Belum masuk: ${fmtRp(belumMasukCukai)} — cukai ditagih tapi belum diterima</div>`:'<div style="font-size:10px;color:#4CAF7D;margin-top:3px">✅ Semua cukai yang ditagih sudah diterima</div>'}
+      <div class="rek-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span style="color:var(--cream3);font-size:12px">📤 Keluar (ditalangi)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#E8924A">${fmtRp(cukaiOut)}</span></div>
+      <div class="rek-row"><span style="color:var(--muted);font-size:11px">Selisih (Potensi Masuk − Keluar)</span><span style="font-weight:800;font-family:'Space Mono',monospace;font-size:12px;color:${(cukaiIn-cukaiOut)>=0?'#4CAF7D':'#C0392B'}">${fmtRp(Math.abs(cukaiIn-cukaiOut))}</span></div>
       <div style="border-top:1px dashed var(--border);margin-top:9px;padding-top:9px">
         <div style="font-size:9px;font-weight:700;color:#4A9FD4;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🛂 Input Cukai Ditalangi (Cepat)</div>
         <select id="cukai-quick-trip-r" style="width:100%;margin-bottom:6px;font-size:11px"><option value="">Pilih trip...</option>${(cachedTrips||[]).map(t=>`<option value="${t.id}">${t.id} · ${t.route} · ${t.courier||'-'}</option>`).join('')}</select>
@@ -5696,17 +5781,14 @@ async function renderRekap(){
       <div class="rek-row"><span style="color:var(--cream3);font-size:12px">⚠️ Selisih berat ≥15%</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${nWeightDiff?'#D4504A':'#4CAF7D'}">${nWeightDiff}</span></div>
       <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">Rincian tiap barang (berat, harga, foto) bisa dibuka per trip di menu <strong style="color:var(--gold3)">Pembukuan</strong>.</div>
     </div>
-    <div class="rek-card" style="margin-bottom:8px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Trip / Kurir</div>
-      ${Object.entries(byTrip).map(([t,d])=>`<div class="rek-row"><div><div style="color:var(--cream3);font-size:12px">${t} <span style="color:var(--muted);font-weight:400">· ${d.route}</span></div><div style="font-size:10px;color:var(--muted)">${d.count} order · <strong style="color:var(--cream3)">${d.kg.toFixed(1)} kg</strong>${d.cukaiIn?(' · cukai '+fmtRp(d.cukaiIn)):''}</div></div><div style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(d.rev)}</div></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
-    </div>
-    <div class="rek-card" style="margin-bottom:8px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Rute</div>
-      ${Object.entries(byRoute).map(([r,v])=>`<div class="rek-row"><span style="color:var(--cream3);font-size:12px">${r}</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(v)}</span></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
-    </div>
-    <div class="rek-card" style="margin-bottom:10px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Kategori</div>
-      ${Object.entries(byCat).map(([cat,d])=>`<div class="rek-row"><div><div style="color:var(--cream3);font-size:12px">${cat}</div><div style="font-size:10px;color:var(--muted)">${d.count} order · ${d.kg.toFixed(1)} kg</div></div><div style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(d.rev)}</div></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
+
+    <div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:var(--gold);letter-spacing:1.5px">💵 LAPORAN 3 · KESELURUHAN</div></div>
+    <div style="font-size:9px;color:var(--muted);margin-bottom:10px;line-height:1.5">Untuk cek arus kas rekening — total yang SEHARUSNYA masuk vs yang BENAR-BENAR sudah masuk.</div>
+    <div class="rek-card" style="margin-bottom:10px;border:1.5px solid ${totalBelumMasuk<1000?'rgba(76,175,125,.4)':'rgba(212,80,74,.4)'}">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${totalBelumMasuk<1000?'#4CAF7D':'#D4504A'};letter-spacing:1px;margin-bottom:10px">${totalBelumMasuk<1000?'✅ Semua Uang Sudah Masuk Rekening':'⚠️ TOTAL BELUM MASUK REKENING'}</div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">🎒 Bagasi belum masuk</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${belumMasukBagasi<1000?'#4CAF7D':'#D4A017'}">${fmtRp(belumMasukBagasi)}</span></div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">🛂 Cukai belum masuk</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${belumMasukCukai<1000?'#4CAF7D':'#D4A017'}">${fmtRp(belumMasukCukai)}</span></div>
+      <div class="rek-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span style="font-weight:700;font-size:12px">TOTAL BELUM MASUK</span><span style="font-weight:900;font-family:'Space Mono',monospace;font-size:14px;color:${totalBelumMasuk<1000?'#4CAF7D':'#D4504A'}">${fmtRp(totalBelumMasuk)}</span></div>
     </div>
     <button class="btn btn-teal btn-block" onclick="exportCSV()">📊 Export CSV</button>`;
 }
