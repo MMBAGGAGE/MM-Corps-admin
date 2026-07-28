@@ -275,7 +275,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v12 · fix filter trip rekap</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v14 · transparansi berat/harga/foto</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1907,6 +1907,20 @@ function openOrderModal(id){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <div class="field" style="margin:0"><label>Berat/Qty Aktual</label><input type="number" id="iq-${i}" value="${it.actQty??it.qty}" step="0.01" inputmode="decimal"></div>
         <div class="field" style="margin:0"><label>Harga/<span id="unitlbl-${i}">${it.type||'kg'}</span>${it.adminPriced?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ir-${i}" value="${itemRateInputValue(it)}" placeholder="${it.adminPriced?'Tentukan harga...':''}" style="${it.adminPriced&&!itemRateInputValue(it)?'border:2px solid #D4A017':''}" inputmode="numeric"></div>
+      </div>
+      <div style="margin-bottom:8px">
+        ${it.scalePhoto ? `
+        <div style="display:flex;gap:8px;align-items:center;background:rgba(74,159,212,.08);border:1px solid rgba(74,159,212,.25);border-radius:9px;padding:8px">
+          <img src="${it.scalePhoto}" onclick="viewScalePhoto('${id}',${i})" style="width:52px;height:52px;object-fit:cover;border-radius:7px;cursor:pointer;flex-shrink:0">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:10px;font-weight:700;color:#4A9FD4">⚖️📷 Foto Timbangan</div>
+            <div style="font-size:9px;color:var(--muted)">Ketuk foto untuk lihat penuh</div>
+          </div>
+          <button type="button" onclick="pickScalePhoto('${id}',${i})" style="background:rgba(212,160,23,.12);border:1px solid rgba(212,160,23,.3);color:#D4A017;border-radius:6px;padding:5px 9px;font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0">🔄</button>
+          <button type="button" onclick="removeScalePhotoStaged('${id}',${i})" style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:6px;padding:5px 9px;font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0">🗑</button>
+        </div>` : `
+        <button type="button" class="btn btn-block" onclick="pickScalePhoto('${id}',${i})" style="background:transparent;border:1px dashed rgba(74,159,212,.4);color:#4A9FD4;padding:8px;font-size:11px">📸 Ambil Foto Timbangan (bukti berat aktual)</button>`}
+        <input type="file" accept="image/*" id="scale-photo-input-${i}" style="display:none" onchange="handleScalePhotoPick(this,'${id}',${i})">
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
@@ -4057,6 +4071,18 @@ function runAudit(period){
     if(tripExpenses>=100000 && tripOrders===0) flags.push({id:'H-'+t.id, sev:'high', cat:'Trip tanpa order', msg:`Trip ${t.id} (${t.route||'-'}, kurir ${t.courier||'-'}) punya biaya tercatat ${fmt(tripExpenses)} tapi tidak ada order sama sekali.`});
   });
 
+  // I. Selisih berat aktual vs deklarasi customer cukup besar, TANPA foto timbangan
+  orders.forEach(o=>{
+    if(o.status==='cancelled') return;
+    (o.items||[]).forEach(it=>{
+      if(it.status!=='approved') return;
+      const declared=it.qty||0;
+      const actual=it.actQty!=null?it.actQty:it.qty;
+      if(declared>0 && Math.abs(actual-declared)/declared>=0.15 && !it.scalePhoto)
+        flags.push({id:'I-'+o.id+'-'+it.cat, sev:'low', cat:'Selisih berat tanpa bukti foto', msg:`Order ${o.code||o.id}: "${it.cat}" berat aktual (${actual}${it.type||'kg'}) beda cukup jauh dari deklarasi customer (${declared}${it.type||'kg'}) tanpa foto timbangan sebagai bukti.`});
+    });
+  });
+
   return flags;
 }
 function auditPanelHTML(flags){
@@ -4096,6 +4122,40 @@ function auditPanelHTML(flags){
     <div style="font-size:9px;color:var(--muted);margin-top:8px;line-height:1.5">Ini deteksi otomatis berdasarkan pola data, <strong>bukan tuduhan pasti</strong> — selalu verifikasi manual sebelum mengambil tindakan.</div>
   </div>`;
 }
+// ── 📦 RINCIAN BARANG & FOTO — transparansi berat/harga/foto ke owner ──
+// Sengaja TIDAK menampilkan gambar langsung (banyak foto base64 sekaligus
+// bisa bikin halaman berat & lag di HP). Yang ditampilkan teks ringan +
+// tombol "Lihat Foto" yang membuka viewer yang SUDAH ADA (bukaFotoItem /
+// viewScalePhoto) — foto dimuat hanya saat benar-benar diminta.
+let _pembExpandedTrips=new Set();
+function togglePembTripDetail(key){
+  if(_pembExpandedTrips.has(key)) _pembExpandedTrips.delete(key);
+  else _pembExpandedTrips.add(key);
+  renderPembukuan();
+}
+function itemsDetailHTML(items){
+  const fmt=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
+  const rows=items.map(d=>{
+    const diffWarn = d.weightDiffPct>=15;
+    const custBtn = d.hasCustPhoto
+      ? `<button onclick="bukaFotoItem('${d.orderId}',${d.idx})" style="background:rgba(76,175,125,.12);border:1px solid rgba(76,175,125,.3);color:#4CAF7D;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">📷 Foto Customer</button>`
+      : `<span style="font-size:9px;color:#D4504A">tanpa foto customer</span>`;
+    const scaleBtn = d.hasScalePhoto
+      ? `<button onclick="viewScalePhoto('${d.orderId}',${d.idx})" style="background:rgba(74,159,212,.12);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">⚖️📷 Foto Timbangan</button>`
+      : `<span style="font-size:9px;color:#D4504A">tanpa foto timbangan</span>`;
+    return `<div style="background:var(--dark3);border-radius:8px;padding:9px 10px;margin-bottom:6px;${diffWarn?'border-left:2px solid #D4A017':''}">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:5px">
+        <div style="min-width:0">
+          <div style="font-size:11px;font-weight:700;color:var(--cream)">${d.cat} <span style="color:var(--muted);font-weight:400">· ${d.orderCode} (${d.orderName})</span></div>
+          <div style="font-size:10px;color:var(--muted)">Berat: <strong style="color:${diffWarn?'#D4A017':'var(--cream3)'}">${d.actual}${d.type}</strong>${d.declared!==d.actual?` (deklarasi: ${d.declared}${d.type})`:''}${diffWarn?' ⚠️':''}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0"><div style="font-size:11px;font-weight:700;color:var(--gold)">${fmt(d.subtotal)}</div><div style="font-size:9px;color:var(--muted)">${fmt(d.rate)}/${d.type}</div></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${custBtn}${scaleBtn}</div>
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:7px">${rows}</div>`;
+}
 function renderPembukuan(){
   const el=document.getElementById('pembukuan-result');
   if(!el) return;
@@ -4108,7 +4168,7 @@ function renderPembukuan(){
     const c=t.courier||'Tanpa Kurir';
     const dk=tripDisplayKey(t.id);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[]};
   });
 
   // Orders → revenue + komisi affiliate + CUKAI MASUK (dibebankan ke customer via invoice/kelola)
@@ -4120,12 +4180,27 @@ function renderPembukuan(){
     const c=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
     const dk=tripDisplayKey(o.tripId);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[]};
     const tr=byCourier[c].trips[dk.key];
     const rev=orderRevenue(o);
     const kg=orderKg(o);
     tr.rev+=rev; tr.kg+=kg; tr.orders++;
     tr.cukaiIn+=(o.cukaiAmount||0); // cukai yg dibebankan ke customer (dari Kelola/Invoice, sumber tunggal: o.cukaiAmount)
+    // Rincian per barang — utk transparansi berat/harga/foto ke owner (lihat itemsDetailHTML)
+    (o.items||[]).forEach((it,idx)=>{
+      if(it.status==='rejected') return;
+      const declared=it.qty||0;
+      const actual=it.actQty!=null?it.actQty:it.qty;
+      tr.itemsDetail.push({
+        orderId:o.id, idx, orderCode:o.code||o.id, orderName:o.name||'-',
+        cat:it.cat, type:it.type||'kg', declared, actual,
+        rate:(it.actRate!=null?it.actRate:it.rate)||0,
+        subtotal:actual*((it.actRate!=null?it.actRate:it.rate)||0),
+        hasCustPhoto:!!it.photo, hasScalePhoto:!!it.scalePhoto,
+        weightDiffPct: declared>0 ? Math.abs(actual-declared)/declared*100 : 0,
+        status:it.status,
+      });
+    });
     // Komisi affiliate
     if(o.referral && o.referral.code){
       const comm=(parseFloat(o.referral.commissionPerKg)||0)*kg;
@@ -4140,7 +4215,7 @@ function renderPembukuan(){
     const c=ex.courier||'Tanpa Kurir';
     const dk=ex.tripId?tripDisplayKey(ex.tripId):{key:ex.tripId||'-',label:ex.tripId||'-'};
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[]};
     byCourier[c].trips[dk.key].cost+=(ex.amount||0);
     if(ex.type==='cukai') byCourier[c].trips[dk.key].cukaiOut+=(ex.amount||0); // subset dari cost, dilacak terpisah utk analisis
     byCourier[c].trips[dk.key].expenses.push(ex);
@@ -4154,7 +4229,7 @@ function renderPembukuan(){
     const c=p.courier||'Tanpa Kurir';
     const dk=p.tripId?tripDisplayKey(p.tripId):{key:p.tripId||'-',label:p.tripId||'-'};
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[]};
     byCourier[c].trips[dk.key].payments.push(p);
   });
 
@@ -4272,6 +4347,18 @@ function renderPembukuan(){
           ${(tr.cukaiIn||tr.cukaiOut)?`<div style="display:flex;justify-content:space-between"><span>🛂 Cukai Masuk / Keluar</span><span style="color:#4A9FD4">${fmt(tr.cukaiIn)} / ${fmt(tr.cukaiOut)}</span></div>`:''}
           <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-weight:800"><span>✨ Profit Trip</span><span style="color:${profit>=0?'#4CAF7D':'#C0392B'}">${fmt(profit)}</span></div>
         </div>`;
+      // Rincian barang: berat, harga, & kelengkapan foto — utk transparansi & pengawasan admin
+      if(tr.itemsDetail.length){
+        const dKey=cd.courier+'|'+tr.tripId;
+        const isOpen=_pembExpandedTrips.has(dKey);
+        const nMissingCust=tr.itemsDetail.filter(d=>!d.hasCustPhoto).length;
+        const nMissingScale=tr.itemsDetail.filter(d=>!d.hasScalePhoto).length;
+        h+=`<button onclick="togglePembTripDetail('${dKey.replace(/'/g,"\\'")}')" style="width:100%;text-align:left;margin-top:8px;background:rgba(74,159,212,.08);border:1px solid rgba(74,159,212,.25);color:#4A9FD4;border-radius:8px;padding:8px 10px;font-size:10px;font-weight:700;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+          <span>📦 Rincian Barang & Foto (${tr.itemsDetail.length})${(nMissingCust||nMissingScale)?` <span style="color:#D4A017">· ${nMissingScale} tanpa foto timbangan</span>`:''}</span>
+          <span>${isOpen?'▲ Tutup':'▼ Buka'}</span>
+        </button>`;
+        if(isOpen) h+=itemsDetailHTML(tr.itemsDetail);
+      }
       // Pembayaran Masuk (bukti TF) khusus trip ini — rapi per trip/kurir
       if(tr.payments.length){
         const tIn=tr.payments.reduce((s,p)=>s+(p.amount||0),0);
@@ -4717,6 +4804,42 @@ function notifPhotoUploaded(o){
 // mungkin (memakai kualitas tertinggi yang masih muat), sambil waktu proses
 // tetap terprediksi (selalu ≤4 kali enkode, bukan sampai 5-6x seperti sebelumnya).
 // imageSmoothingQuality 'high' membuat hasil downscale lebih halus, bukan pecah/kotak.
+// ══════════════════════════════════════════════════
+// ⚖️📷 FOTO TIMBANGAN — bukti berat aktual saat admin/kurir menimbang ulang
+// Dipakai bersama pipeline compressImg yang sama dgn foto kurir & bukti TF.
+// Foto disimpan LANGSUNG di item (it.scalePhoto) dan ikut tersimpan otomatis
+// saat "Simpan Update" ditekan (spread ...it di saveOrder sudah membawanya).
+// ══════════════════════════════════════════════════
+function pickScalePhoto(orderId, idx){
+  const inp=document.getElementById('scale-photo-input-'+idx);
+  if(inp) inp.click();
+}
+async function handleScalePhotoPick(input, orderId, idx){
+  const file=input.files && input.files[0]; if(!file){ return; }
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o){ input.value=''; return; }
+  const it=(o.items||[])[idx]; if(!it){ input.value=''; return; }
+  toast('Memproses foto timbangan...','info');
+  try{
+    const compressed=await compressImg(file);
+    it.scalePhoto=compressed;
+    openOrderModal(orderId); // re-render supaya thumbnail langsung terlihat
+    toast('📸 Foto timbangan siap — klik "Simpan Update" untuk menyimpan ke server','ok');
+  }catch(e){ toast('Gagal memproses foto: '+e.message,'err'); }
+  input.value='';
+}
+function removeScalePhotoStaged(orderId, idx){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const it=(o.items||[])[idx]; if(!it) return;
+  if(!confirm('Hapus foto timbangan ini?')) return;
+  delete it.scalePhoto;
+  openOrderModal(orderId);
+  toast('Foto timbangan dihapus — klik "Simpan Update" untuk menyimpan perubahan','err');
+}
+function viewScalePhoto(orderId, idx){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const it=(o.items||[])[idx]; if(!it || !it.scalePhoto) return;
+  bukaFoto(it.scalePhoto, 'Timbangan-'+(it.cat||'barang').replace(/[^a-zA-Z0-9]/g,''), false);
+}
 function compressImg(file){
   return new Promise(function(resolve,reject){
     if(file.type && file.type.indexOf('video')===0){
@@ -5183,6 +5306,7 @@ async function renderRekap(){
   const totalRev=delivered.reduce((s,o)=>s+orderRevenue(o),0);
   const totalKg=delivered.reduce((s,o)=>s+orderKg(o),0);
   const byTrip={};const byCat={};const byRoute={};
+  let nItemsTotal=0, nMissingCustPhoto=0, nMissingScalePhoto=0, nWeightDiff=0;
   delivered.forEach(o=>{
     const tid=o.tripId||'Manual';
     byTrip[tid]=byTrip[tid]||{count:0,rev:0,kg:0,cukaiIn:0};
@@ -5196,6 +5320,12 @@ async function renderRekap(){
       byCat[it.cat].count++;
       byCat[it.cat].kg+=(it.actQty||it.qty||0);
       byCat[it.cat].rev+=(it.actQty||it.qty||0)*(it.actRate||it.rate||0);
+      // Kelengkapan foto & berat — sinyal cepat utk pengawasan, tanpa memuat gambar
+      nItemsTotal++;
+      if(!it.photo) nMissingCustPhoto++;
+      if(!it.scalePhoto) nMissingScalePhoto++;
+      const declared=it.qty||0, actual=it.actQty!=null?it.actQty:it.qty;
+      if(declared>0 && Math.abs(actual-declared)/declared>=0.15) nWeightDiff++;
     });
   });
   // Cukai keluar (bea cukai/pajak aktual dibayar) — ikut filter trip yang sama
@@ -5214,6 +5344,13 @@ async function renderRekap(){
       <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk (dari customer)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#4CAF7D">${fmtRp(cukaiIn)}</span></div>
       <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📤 Keluar (ke bea cukai)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#E8924A">${fmtRp(cukaiOut)}</span></div>
       <div class="rek-row" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><span style="color:var(--muted);font-size:11px">Selisih</span><span style="font-weight:800;font-family:'Space Mono',monospace;font-size:12px;color:${(cukaiIn-cukaiOut)>=0?'#4CAF7D':'#C0392B'}">${fmtRp(Math.abs(cukaiIn-cukaiOut))}</span></div>
+    </div>
+    <div class="rek-card" style="margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4A9FD4;letter-spacing:1px;margin-bottom:10px">📦 Kelengkapan Foto & Berat (${nItemsTotal} barang)</div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📷 Ada foto customer</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${nMissingCustPhoto?'#D4A017':'#4CAF7D'}">${nItemsTotal-nMissingCustPhoto}/${nItemsTotal}</span></div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">⚖️📷 Ada foto timbangan</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${nMissingScalePhoto?'#D4A017':'#4CAF7D'}">${nItemsTotal-nMissingScalePhoto}/${nItemsTotal}</span></div>
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">⚠️ Selisih berat ≥15%</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${nWeightDiff?'#D4504A':'#4CAF7D'}">${nWeightDiff}</span></div>
+      <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">Rincian tiap barang (berat, harga, foto) bisa dibuka per trip di menu <strong style="color:var(--gold3)">Pembukuan</strong>.</div>
     </div>
     <div class="rek-card" style="margin-bottom:8px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Trip / Kurir</div>
@@ -5265,6 +5402,25 @@ function exportPembukuanLengkap(){
     L.push([o.code||o.id,o.name||'',o.phone||'',o.rcvName||'',o.rcvPhone||'',o.route||'',o.tripId||'',kurir,o.status||'',o.payStatus||'',
       pay?pay.method:'',pay?pay.date:'',kg.toFixed(1),rp(o.totalEst),rp(o.cukaiAmount||0),rp(tagihan),rp(rev),
       pay?rp(pay.amount):'',pay?rp((pay.amount||0)-tagihan):'',pay?(pay.proof?'YA':'tidak'):'tidak',items.length,rincian,o.statusNote||o.invoiceNote||'']);
+  });
+  L.push([]);
+
+  // ══ RINCIAN BARANG — berat, harga, & kelengkapan foto per barang (transparansi & audit) ══
+  L.push(['=== RINCIAN BARANG (BERAT, HARGA, FOTO) ===']);
+  L.push(['Kode Order','Nama Customer','Trip','Kurir','Kategori Barang','Berat/Qty Deklarasi','Berat/Qty Aktual','Satuan','Selisih Berat (%)','Harga/Satuan (Rp)','Subtotal (Rp)','Ada Foto Customer','Ada Foto Timbangan','Status Barang']);
+  orders.forEach(o=>{
+    if(o.status==='cancelled') return;
+    const trip=(cachedTrips||[]).find(t=>t.id===o.tripId);
+    const kurir=trip?(trip.courier||''):'';
+    (o.items||[]).forEach(it=>{
+      const declared=it.qty||0;
+      const actual=it.actQty!=null?it.actQty:it.qty;
+      const rate=(it.actRate!=null?it.actRate:it.rate)||0;
+      const diffPct=declared>0?Math.round(Math.abs(actual-declared)/declared*100):0;
+      L.push([o.code||o.id, o.name||'', o.tripId||'', kurir, it.cat||'', declared, actual, it.type||'kg', diffPct,
+        rp(rate), rp(actual*rate), it.photo?'YA':'tidak', it.scalePhoto?'YA':'tidak',
+        it.status==='rejected'?'Ditolak':it.status==='cancel_requested'?'Minta Batal':it.status==='approved'?'Disetujui':'Pending']);
+    });
   });
   L.push([]);
   L.push(['=== PEMBAYARAN MASUK (BUKTI TF) ===']);
