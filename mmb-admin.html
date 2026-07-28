@@ -282,7 +282,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v17 · mesin selesai otomatis & berat per rute</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v21 · bagi hasil investor</div>
     <div id="trips-list"></div>
   </div>
 
@@ -446,6 +446,11 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
         </div>
         <div style="font-size:9px;color:var(--muted);margin-top:5px;line-height:1.4">🧑‍✈️ Per Kurir: gabungkan Cairo→Jakarta→Cairo jadi satu laporan kurir. ✈️ Per Trip: tampilkan tiap arah/rute secara terpisah.</div>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="field" style="margin:0"><label>Kurir Tertentu</label><select id="pemb-filter-kurir" onchange="renderPembukuan()"><option value="">Semua Kurir</option></select></div>
+        <div class="field" style="margin:0"><label>Rute Tertentu</label><select id="pemb-filter-rute" onchange="renderPembukuan()"><option value="">Semua Rute</option></select></div>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin:5px 0 12px;line-height:1.4">Pilih salah satu untuk menampilkan HANYA data itu — tanpa data kurir/rute lain atau ringkasan bulanan yang mengganggu.</div>
       <div id="pembukuan-result"></div>
     </div>
   </div>
@@ -679,6 +684,18 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
       </select>
     </div>
     <div class="field"><label>Catatan</label><textarea id="t-note" placeholder="Info khusus trip ini..."></textarea></div>
+    <div class="field" style="background:rgba(212,160,23,.06);border:1px solid rgba(212,160,23,.25);border-radius:10px;padding:11px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:0">
+        <input type="checkbox" id="t-investor-on" onchange="toggleInvestorFields(this.checked)" style="width:38px;height:22px;accent-color:#D4A017;cursor:pointer">
+        <span style="font-weight:700;color:#D4A017">💼 Modal Tiket dari Investor</span>
+      </label>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px;margin-bottom:8px">Aktifkan kalau modal tiket trip ini berasal dari investor (bukan modal sendiri) — profit trip akan otomatis dibagi sesuai persentase di bawah.</div>
+      <div id="t-investor-fields" style="display:none">
+        <div class="field" style="margin:0 0 8px"><label>Nama Investor</label><input type="text" id="t-investor-name" placeholder="mis. Pak Budi"></div>
+        <div class="field" style="margin:0"><label>Persentase Bagi Hasil Investor (%)</label><input type="number" id="t-investor-percent" placeholder="mis. 50" min="0" max="100" inputmode="numeric"></div>
+        <div style="font-size:9px;color:var(--muted);margin-top:5px">Sisanya (100% − persentase ini) otomatis jadi bagian Anda dari profit trip ini.</div>
+      </div>
+    </div>
     <div class="field" style="background:rgba(74,159,212,.05);border:1px solid var(--border);border-radius:10px;padding:11px">
       <label>💰 Harga Khusus Trip Ini (opsional)</label>
       <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Isi hanya kategori yang harganya beda untuk trip ini. Yang kosong otomatis pakai harga default dari Setting. Harga ini yang dipakai customer saat memilih trip ini.</div>
@@ -1102,7 +1119,7 @@ function showPage(id){
   if(id==='trips'){ renderTrips(); }
   if(id==='rekap') renderRekap();
   if(id==='settings'){ renderSettings(); if(typeof renderAkun==='function') renderAkun(); }
-  if(id==='pembukuan'){ fillExpenseTripDropdown(); renderPembukuan(); }
+  if(id==='pembukuan'){ fillExpenseTripDropdown(); fillPembukuanFilterDropdowns(); renderPembukuan(); }
   if(id==='analisis'){ fillAnalisisDropdowns(); renderAnalisis(); }
   if(id==='kurir') initKurirPage();
   if(id==='galeri') initGaleri();
@@ -2445,6 +2462,7 @@ function setupTripsListener(){
     // Update klasifikasi Trip/Kurir di halaman Order (utk audit)
     if(typeof fillOrderClassifyDropdowns==='function') fillOrderClassifyDropdowns();
     if(typeof fillAnalisisDropdowns==='function') fillAnalisisDropdowns();
+    if(typeof fillPembukuanFilterDropdowns==='function') fillPembukuanFilterDropdowns();
     // Re-render trips page if active
     if(document.getElementById('page-trips')?.classList.contains('active')){
       renderTrips();
@@ -2700,6 +2718,35 @@ function expPhotoClear(){
   _expPhoto=null;
   const wrap=document.getElementById('exp-photo-wrap');
   if(wrap) wrap.innerHTML='<label style="display:block;background:var(--dark2);border:1px dashed var(--border);border-radius:9px;padding:14px;text-align:center;font-size:12px;color:var(--gold);cursor:pointer">📷 Ketuk untuk pilih/ambil foto struk<input type="file" accept="image/*" capture="environment" onchange="expPhotoPick(this)" style="display:none"></label>';
+}
+// ── INPUT CUKAI CEPAT dari Pembukuan/Rekap — memakai data model expense
+// PERSIS SAMA (type:'cukai') supaya tidak menciptakan sumber data kedua.
+// Cuma jalan pintas UI: admin tidak perlu pindah ke form Pengeluaran lengkap.
+// suffix: 'p' (Pembukuan) atau 'r' (Rekap) — ID field beda per halaman
+// supaya TIDAK bentrok (dua halaman ini sama² ada di DOM sekaligus).
+async function quickAddCukai(suffix){
+  if(!guard('quickcukai',800)) return;
+  const sfx=suffix||'p';
+  const tripId=document.getElementById('cukai-quick-trip-'+sfx)?.value||'';
+  const amount=parseFloat(document.getElementById('cukai-quick-amount-'+sfx)?.value)||0;
+  const note=(document.getElementById('cukai-quick-note-'+sfx)?.value||'').trim();
+  if(!tripId){ toast('Pilih trip dulu','err'); return; }
+  if(amount<=0){ toast('Jumlah harus lebih dari 0','err'); return; }
+  const trip=(cachedTrips||[]).find(t=>t.id===tripId);
+  const courier=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
+  const payload={
+    tripId, courier, type:'cukai', note:note||'Cukai ditalangi',
+    amount, origCurrency:'IDR', origAmount:amount, egpRate:null, photo:null,
+    ts:Date.now(), createdAt:new Date().toISOString(), addedBy:currentRole
+  };
+  const tempId='temp-'+Date.now();
+  cachedExpenses=[...(cachedExpenses||[]), {...payload, id:tempId}];
+  if(document.getElementById('page-pembukuan')?.classList.contains('active') && typeof renderPembukuan==='function') renderPembukuan();
+  if(document.getElementById('page-rekap')?.classList.contains('active') && typeof renderRekap==='function') renderRekap();
+  toast('🛂 Cukai ditalangi tersimpan ✅','ok');
+  const elAmt=document.getElementById('cukai-quick-amount-'+sfx); if(elAmt) elAmt.value='';
+  const elNote=document.getElementById('cukai-quick-note-'+sfx); if(elNote) elNote.value='';
+  db.collection('expenses').add(payload).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
 }
 async function addExpense(){
   if(!guard('addexp',800)) return;
@@ -3762,6 +3809,16 @@ function refreshCapacityUI(affectedTripId){
   return affectedTripId?tripSlotText(affectedTripId):'';
 }
 function anNormPhone(p){ return String(p||'').replace(/\D/g,''); }
+function fillPembukuanFilterDropdowns(){
+  const selK=document.getElementById('pemb-filter-kurir'), selR=document.getElementById('pemb-filter-rute');
+  if(!selK||!selR) return;
+  const curK=selK.value, curR=selR.value;
+  const kuriers=[...new Set((cachedTrips||[]).map(t=>t.courier).filter(Boolean))].sort();
+  selK.innerHTML='<option value="">Semua Kurir</option>'+kuriers.map(k=>`<option value="${k}">${k}</option>`).join('');
+  const rutes=[...new Set((cachedTrips||[]).map(t=>t.route).filter(Boolean))].sort();
+  selR.innerHTML='<option value="">Semua Rute</option>'+rutes.map(r=>`<option value="${r}">${r}</option>`).join('');
+  if(curK) selK.value=curK; if(curR) selR.value=curR;
+}
 function fillAnalisisDropdowns(){
   const selT=document.getElementById('an-trip'), selK=document.getElementById('an-kurir');
   if(!selT||!selK) return;
@@ -4250,15 +4307,25 @@ function renderPembukuan(){
   const el=document.getElementById('pembukuan-result');
   if(!el) return;
   const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
+  // ── FILTER KURIR/RUTE TERTENTU ── kalau dipilih, HANYA tampilkan data itu,
+  // tanpa data kurir/rute lain atau ringkasan bulanan (biar tidak mengganggu
+  // konsentrasi saat scroll — sesuai permintaan).
+  const fKurir=document.getElementById('pemb-filter-kurir')?.value||'';
+  const fRute=document.getElementById('pemb-filter-rute')?.value||'';
+  const hasSpecificFilter=!!(fKurir||fRute);
+  const allowedTripIds=new Set((cachedTrips||[])
+    .filter(t=>(!fKurir||t.courier===fKurir) && (!fRute||t.route===fRute))
+    .map(t=>t.id));
 
   // Group by courier → trip (dengan penggabungan PP jika mode gabung)
   const byCourier={};
   // Init from trips so kurir tanpa order tetap muncul
   (cachedTrips||[]).forEach(t=>{
+    if(!allowedTripIds.has(t.id)) return;
     const c=t.courier||'Tanpa Kurir';
     const dk=tripDisplayKey(t.id);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0, totalRevPaid:0, totalRevPending:0, totalOrdersPaid:0, totalOrdersPending:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:t.route||'', date:t.date||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}, cukaiExpenses:[], investorEnabled:!!t.investorEnabled, investorName:t.investorName||'', investorPercent:t.investorPercent||0};
   });
 
   // Orders → revenue + komisi affiliate + CUKAI MASUK (dibebankan ke customer via invoice/kelola)
@@ -4266,11 +4333,12 @@ function renderPembukuan(){
     if(o.status==='cancelled') return;
     if(!o.tripId) return;
     if(!periodFilter(o.ts||o.createdAt||Date.now(), period)) return;
+    if(!allowedTripIds.has(o.tripId)) return;
     const trip=cachedTrips.find(t=>t.id===o.tripId);
     const c=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
     const dk=tripDisplayKey(o.tripId);
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0, totalRevPaid:0, totalRevPending:0, totalOrdersPaid:0, totalOrdersPending:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:(trip&&trip.route)||'', date:(trip&&trip.date)||'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}, cukaiExpenses:[], investorEnabled:false, investorName:'', investorPercent:0};
     const tr=byCourier[c].trips[dk.key];
     const rev=orderRevenue(o);
     const kg=orderKg(o);
@@ -4307,15 +4375,24 @@ function renderPembukuan(){
   });
 
   // Expenses → per trip (ikut penggabungan PP) + CUKAI KELUAR (dibayar ke otoritas bea cukai, type='cukai')
+  // ── PERBAIKAN BUG ──: sebelumnya pengeluaran ber-type 'cukai' IKUT
+  // mengurangi "Modal & Biaya" bagasi (padahal cukai cuma titipan customer,
+  // bukan biaya bisnis). Sekarang cukai keluar SAMA SEKALI TIDAK menyentuh
+  // cost bagasi — dilacak sepenuhnya terpisah di cukaiOut & cukaiExpenses.
   (cachedExpenses||[]).forEach(ex=>{
     if(!periodFilter(ex.ts||Date.now(), period)) return;
+    if(hasSpecificFilter && (!ex.tripId || !allowedTripIds.has(ex.tripId))) return;
     const c=ex.courier||'Tanpa Kurir';
     const dk=ex.tripId?tripDisplayKey(ex.tripId):{key:ex.tripId||'-',label:ex.tripId||'-'};
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0, totalRevPaid:0, totalRevPending:0, totalOrdersPaid:0, totalOrdersPending:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}};
-    byCourier[c].trips[dk.key].cost+=(ex.amount||0);
-    if(ex.type==='cukai') byCourier[c].trips[dk.key].cukaiOut+=(ex.amount||0); // subset dari cost, dilacak terpisah utk analisis
-    byCourier[c].trips[dk.key].expenses.push(ex);
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}, cukaiExpenses:[], investorEnabled:false, investorName:'', investorPercent:0};
+    if(ex.type==='cukai'){
+      byCourier[c].trips[dk.key].cukaiOut+=(ex.amount||0);
+      byCourier[c].trips[dk.key].cukaiExpenses.push(ex);
+    } else {
+      byCourier[c].trips[dk.key].cost+=(ex.amount||0);
+      byCourier[c].trips[dk.key].expenses.push(ex);
+    }
   });
 
   // ── Bukti TF/Pembayaran → per trip (SAMA seperti pengeluaran) ──
@@ -4323,10 +4400,11 @@ function renderPembukuan(){
   // panjang tercampur seperti sebelumnya.
   (cachedPayments||[]).forEach(p=>{
     if(!periodFilter(p.ts||Date.now(), period)) return;
+    if(hasSpecificFilter && (!p.tripId || !allowedTripIds.has(p.tripId))) return;
     const c=p.courier||'Tanpa Kurir';
     const dk=p.tripId?tripDisplayKey(p.tripId):{key:p.tripId||'-',label:p.tripId||'-'};
     if(!byCourier[c]) byCourier[c]={courier:c, trips:{}, totalRev:0, totalCost:0, totalComm:0, totalProfit:0, totalKg:0, orderCount:0, totalCukaiIn:0, totalCukaiOut:0, totalRevPaid:0, totalRevPending:0, totalOrdersPaid:0, totalOrdersPending:0};
-    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}};
+    if(!byCourier[c].trips[dk.key]) byCourier[c].trips[dk.key]={tripId:dk.label, route:'', date:'', rev:0, kg:0, orders:0, cost:0, comm:0, expenses:[], commDetails:[], payments:[], cukaiIn:0, cukaiOut:0, itemsDetail:[], revPaid:0, revPending:0, kgPaid:0, kgPending:0, ordersPaid:0, ordersPending:0, cukaiInPaid:0, cukaiInPending:0, commPaid:0, commPending:0, kgByRoute:{}, cukaiExpenses:[], investorEnabled:false, investorName:'', investorPercent:0};
     byCourier[c].trips[dk.key].payments.push(p);
   });
 
@@ -4410,21 +4488,31 @@ function renderPembukuan(){
   // ══════════════════════════════════════════════════
 
   // 🔍 AUDIT OTOMATIS — paling atas, supaya jadi yang pertama dicek owner
-  let h=auditPanelHTML(runAudit(period));
+  let h='';
+  if(hasSpecificFilter){
+    h+=`<div style="background:rgba(212,168,76,.1);border:1.5px solid rgba(212,168,76,.4);border-radius:11px;padding:11px 13px;margin-bottom:14px;text-align:center">
+      <div style="font-size:11px;font-weight:800;color:var(--gold)">🔎 Menampilkan HANYA: ${fKurir?('Kurir '+fKurir):''}${fKurir&&fRute?' · ':''}${fRute?('Rute '+fRute):''}</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px">Data kurir/rute lain & ringkasan bulanan disembunyikan. Reset ke "Semua" untuk melihat semuanya lagi.</div>
+    </div>`;
+  }
+  h+=auditPanelHTML(runAudit(period));
 
-  // 📊 RINGKASAN UTAMA (Potensial — termasuk yang belum lunas)
+  // ══════════════════════════════════════════════════
+  // LAPORAN 1 · BAGASI — omzet, biaya (TANPA cukai), profit jasa pengiriman
+  // ══════════════════════════════════════════════════
+  h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:var(--gold3);letter-spacing:1.5px">📦 LAPORAN 1 · BAGASI</div></div>`;
+
   h+=`<div style="background:linear-gradient(135deg,#1A1410,#0D0D0D);border:1.5px solid var(--gold);border-radius:13px;padding:16px;margin-bottom:14px">
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📊 Ringkasan Utama — Total Potensial (Semua Kurir, termasuk yang belum lunas)</div>
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">📊 Ringkasan — Total Potensial (termasuk yang belum lunas)</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><div style="font-size:10px;color:var(--muted)">💰 Omzet/Revenue</div><div style="font-size:15px;font-weight:800;color:var(--cream)">${fmt(grandRev)}</div></div>
-      <div><div style="font-size:10px;color:var(--muted)">📉 Modal+Biaya</div><div style="font-size:15px;font-weight:800;color:#E8924A">${fmt(grandCost)}</div></div>
+      <div><div style="font-size:10px;color:var(--muted)">📉 Modal+Biaya (di luar cukai)</div><div style="font-size:15px;font-weight:800;color:#E8924A">${fmt(grandCost)}</div></div>
       <div><div style="font-size:10px;color:var(--muted)">🤝 Komisi Affiliate</div><div style="font-size:15px;font-weight:800;color:#4A9FD4">${fmt(grandComm)}</div></div>
       <div><div style="font-size:10px;color:var(--muted)">✨ Profit Bersih (Potensial)</div><div style="font-size:17px;font-weight:900;color:${grandProfit>=0?'#4CAF7D':'#C0392B'}">${fmt(grandProfit)}</div></div>
     </div>
     <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px;font-size:11px;color:var(--muted)">Margin: <strong style="color:${grandProfit>=0?'#4CAF7D':'#C0392B'}">${grandRev>0?Math.round(grandProfit/grandRev*100):0}%</strong> · Cash flow ${grandProfit>=0?'positif ✅':'negatif ⚠️'}</div>
   </div>`;
 
-  // ✅ TERKONFIRMASI vs 🕓 ESTIMASI
   h+=`<div style="background:linear-gradient(135deg,rgba(76,175,125,.06),#0D0D0D);border:1.5px solid rgba(76,175,125,.35);border-radius:13px;padding:16px;margin-bottom:14px">
     <div style="font-size:10px;color:#4CAF7D;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-weight:800">✅ Profit Terkonfirmasi (Sudah Lunas + Bukti TF)</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -4441,7 +4529,7 @@ function renderPembukuan(){
   // 📦 STATUS PENGAMBILAN BARANG — utk order yang sudah tiba di Cairo, pisahkan
   // 4 kombinasi bayar × ambil, supaya owner langsung tahu mana yg berisiko
   // (sudah diambil tapi belum lunas) dan mana yg perlu ditagih/ditindaklanjuti.
-  const arrivedOrders=(cachedOrders||[]).filter(o=>o.status!=='cancelled' && orderPickupRelevant(o) && periodFilter(o.ts||o.createdAt||Date.now(), period));
+  const arrivedOrders=(cachedOrders||[]).filter(o=>o.status!=='cancelled' && orderPickupRelevant(o) && periodFilter(o.ts||o.createdAt||Date.now(), period) && (!hasSpecificFilter||allowedTripIds.has(o.tripId)));
   if(arrivedOrders.length){
     const qCounts={lunas_diambil:0, lunas_belum_diambil:0, risiko_diambil_belum_lunas:0, belum_lunas_belum_diambil:0};
     arrivedOrders.forEach(o=>{ qCounts[orderQuadrant(o)]++; });
@@ -4457,26 +4545,49 @@ function renderPembukuan(){
     </div>`;
   }
 
-  // 📦 BAGASI vs 🛂 CUKAI — dibedakan tegas di level grand (bukan cuma tercampur
-  // sebagai satu baris di antara angka lain). Bagasi = pendapatan asli bisnis.
-  // Cukai = titipan customer utk dibayarkan ke bea cukai, BUKAN keuntungan.
-  const cukaiSelisih=grandCukaiIn-grandCukaiOut;
-  h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-    <div style="background:var(--bg2);border:1.5px solid rgba(212,168,76,.3);border-radius:13px;padding:14px">
-      <div style="font-size:10px;color:var(--gold3);text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:8px">📦 Bagasi (Jasa)</div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:2px">Omzet Bagasi</div>
-      <div style="font-size:14px;font-weight:800;color:var(--cream);margin-bottom:8px">${fmt(grandRev)}</div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:2px">Profit Bagasi (Potensial)</div>
-      <div style="font-size:15px;font-weight:900;color:${grandProfit>=0?'#4CAF7D':'#C0392B'}">${fmt(grandProfit)}</div>
-    </div>
-    <div style="background:var(--bg2);border:1.5px solid rgba(74,159,212,.3);border-radius:13px;padding:14px">
-      <div style="font-size:10px;color:#4A9FD4;text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:8px">🛂 Cukai (Titipan)</div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:2px">Masuk / Keluar</div>
-      <div style="font-size:12px;font-weight:800;color:var(--cream);margin-bottom:8px">${fmt(grandCukaiIn)} / ${fmt(grandCukaiOut)}</div>
-      <div style="font-size:9px;color:var(--muted);margin-bottom:2px">Selisih</div>
-      <div style="font-size:15px;font-weight:900;color:${cukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(cukaiSelisih))}</div>
+  h+=`<div style="background:var(--bg2);border:1.5px solid rgba(212,168,76,.3);border-radius:13px;padding:14px;margin-bottom:14px">
+    <div style="font-size:10px;color:var(--gold3);text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:8px">📦 Ringkasan Bagasi Saja</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Omzet Bagasi</div><div style="font-size:14px;font-weight:800;color:var(--cream)">${fmt(grandRev)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Profit Bagasi (Potensial)</div><div style="font-size:15px;font-weight:900;color:${grandProfit>=0?'#4CAF7D':'#C0392B'}">${fmt(grandProfit)}</div></div>
     </div>
   </div>`;
+
+  // ══════════════════════════════════════════════════
+  // LAPORAN 2 · CUKAI — titipan customer, benar² terpisah dari Bagasi
+  // ══════════════════════════════════════════════════
+  h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:#4A9FD4;letter-spacing:1.5px">🛂 LAPORAN 2 · CUKAI</div></div>`;
+
+  const cukaiSelisih=grandCukaiIn-grandCukaiOut;
+  h+=`<div style="background:var(--bg2);border:1.5px solid rgba(74,159,212,.3);border-radius:13px;padding:14px;margin-bottom:12px">
+    <div style="font-size:10px;color:#4A9FD4;text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:8px">🛂 Cukai — Bea Cukai/Pajak (titipan, bukan profit)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk (dari customer, via Invoice/Kelola)</div><div style="font-size:13px;font-weight:800;color:#4CAF7D">${fmt(grandCukaiIn)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📤 Keluar (ditalangi ke bea cukai)</div><div style="font-size:13px;font-weight:800;color:#E8924A">${fmt(grandCukaiOut)}</div></div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px;font-size:11px;color:var(--muted)">
+      Selisih: <strong style="color:${cukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(cukaiSelisih))}</strong> ${cukaiSelisih>=0?'— cukai dari customer SUDAH menutupi/lebih dari yang ditalangi ✅':'— YANG DITALANGI LEBIH BESAR dari yang diterima ⚠️ (ada order belum bayar cukai penuh)'}
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">📥 Otomatis dari kolom Cukai/Pajak di Kelola &amp; Invoice tiap order — TIDAK bisa diinput manual di sini (sumber kebenarannya invoice). 📤 Diinput manual di bawah setiap kali admin membayar/menalangi cukai.</div>
+  </div>`;
+
+  // 🛂 INPUT CUKAI CEPAT — supaya admin tidak perlu pindah ke menu Pengeluaran
+  // terpisah. Tetap memakai data model expense yang sama (type:'cukai'),
+  // supaya laporan tetap satu sumber kebenaran, cuma jalan pintas UI.
+  h+=`<div class="sec-card" style="margin-bottom:14px">
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4A9FD4;letter-spacing:1px;margin-bottom:10px">🛂 Input Cukai Ditalangi (Cepat)</div>
+    <div class="field" style="margin-bottom:8px"><label>Trip</label><select id="cukai-quick-trip-p"><option value="">Pilih trip...</option>${(cachedTrips||[]).map(t=>`<option value="${t.id}">${t.id} · ${t.route} · ${t.courier||'-'}</option>`).join('')}</select></div>
+    <div class="field" style="margin-bottom:8px"><label>Jumlah Ditalangi (Rp)</label><input type="number" id="cukai-quick-amount-p" placeholder="0" inputmode="numeric"></div>
+    <div class="field" style="margin-bottom:8px"><label>Catatan</label><input type="text" id="cukai-quick-note-p" placeholder="mis. cukai 3 order batch pertama"></div>
+    <button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff" onclick="quickAddCukai('p')">💾 Simpan Cukai Keluar</button>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px">Butuh lampirkan foto bukti? Gunakan menu Rekap → Tambah Pengeluaran, pilih jenis "🛂 Bea Cukai/Pajak" — datanya akan otomatis muncul di sini juga.</div>
+  </div>`;
+
+  // ══════════════════════════════════════════════════
+  // LAPORAN 3 · REKAPITULASI KESELURUHAN — utk cek arus kas masuk rekening
+  // ══════════════════════════════════════════════════
+  h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:var(--gold);letter-spacing:1.5px">💵 LAPORAN 3 · REKAPITULASI ARUS KAS</div></div>`;
+  h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:10px;line-height:1.5">Laporan ini untuk mencocokkan dengan mutasi rekening bank — total uang yang BENAR-BENAR masuk (bukti TF), gabungan bagasi + cukai.</div>`;
 
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff;margin-bottom:12px" onclick="exportPembukuanLengkap()">📁 Simpan Pembukuan Lengkap ke File (CSV)</button>`;
   h+=payH;
@@ -4492,7 +4603,7 @@ function renderPembukuan(){
         <div style="text-align:right"><div style="font-size:16px;font-weight:900;color:${cd.totalProfit>=0?'#4CAF7D':'#C0392B'}">${fmt(cd.totalProfit)}</div><div style="font-size:9px;color:var(--muted)">profit bersih (potensial)</div></div>
       </div>`;
     // Per trip breakdown
-    Object.values(cd.trips).filter(tr=>tr.orders>0||tr.expenses.length||tr.payments.length).forEach(tr=>{
+    Object.values(cd.trips).filter(tr=>tr.orders>0||tr.expenses.length||tr.payments.length||(tr.cukaiExpenses&&tr.cukaiExpenses.length)).forEach(tr=>{
       const profit=tr.rev-tr.cost-tr.comm;
       const confirmedProfit=tr.revPaid-tr.cost-tr.commPaid;
       const tripCukaiSelisih=tr.cukaiIn-tr.cukaiOut;
@@ -4510,12 +4621,31 @@ function renderPembukuan(){
             ${tr.ordersPending?`<div style="display:flex;justify-content:space-between;font-weight:700"><span style="color:#4CAF7D">✅ Terkonfirmasi</span><span style="color:${confirmedProfit>=0?'#4CAF7D':'#C0392B'}">${fmt(confirmedProfit)}</span></div>`:''}
           </div>
         </div>
+        ${tr.investorEnabled?(function(){
+          const pct=tr.investorPercent||0;
+          const investorShare=profit*(pct/100);
+          const ownerShare=profit-investorShare;
+          const investorShareConfirmed=confirmedProfit*(pct/100);
+          const ownerShareConfirmed=confirmedProfit-investorShareConfirmed;
+          return `<div style="background:rgba(212,160,23,.06);border:1px solid rgba(212,160,23,.25);border-radius:8px;padding:9px;margin-bottom:7px">
+            <div style="font-size:9px;font-weight:800;color:#D4A017;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">💼 Bagi Hasil Investor — ${tr.investorName||'(nama belum diisi)'} (${pct}%)</div>
+            <div style="font-size:11px;color:var(--cream3);line-height:1.7">
+              <div style="display:flex;justify-content:space-between"><span>Bagian Investor (Potensial)</span><span style="color:#D4A017;font-weight:700">${fmt(investorShare)}</span></div>
+              <div style="display:flex;justify-content:space-between"><span>Bagian Anda (Potensial)</span><span style="color:var(--cream);font-weight:700">${fmt(ownerShare)}</span></div>
+              ${tr.ordersPending?`<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:4px;padding-top:4px;font-size:10px"><span style="color:#4CAF7D">✅ Bagian Investor (Terkonfirmasi)</span><span style="color:#4CAF7D">${fmt(investorShareConfirmed)}</span></div><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:#4CAF7D">✅ Bagian Anda (Terkonfirmasi)</span><span style="color:#4CAF7D">${fmt(ownerShareConfirmed)}</span></div>`:''}
+            </div>
+          </div>`;
+        })():''}
         ${(tr.cukaiIn||tr.cukaiOut)?`<div style="background:rgba(74,159,212,.06);border:1px solid rgba(74,159,212,.2);border-radius:8px;padding:9px;margin-bottom:7px">
           <div style="font-size:9px;font-weight:800;color:#4A9FD4;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🛂 Cukai — titipan customer, bukan profit</div>
           <div style="font-size:11px;color:var(--cream3);line-height:1.7">
             <div style="display:flex;justify-content:space-between"><span>Masuk / Keluar</span><span>${fmt(tr.cukaiIn)} / ${fmt(tr.cukaiOut)}</span></div>
             <div style="display:flex;justify-content:space-between;font-weight:800;border-top:1px solid var(--border);margin-top:4px;padding-top:4px"><span>Selisih</span><span style="color:${tripCukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(tripCukaiSelisih))}</span></div>
           </div>
+          ${tr.cukaiExpenses&&tr.cukaiExpenses.length?`<div style="margin-top:6px;font-size:9px;color:var(--muted)">Rincian cukai yang ditalangi:</div>${tr.cukaiExpenses.map(ex=>{
+            const photoBtn=ex.photo?`<button onclick="bukaFotoExpense('${ex.id}')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:2px 7px;font-size:9px;font-weight:700;cursor:pointer">📷</button>`:'';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:2px 0"><span>• ${ex.note||'Cukai'}${ex.tripId?(' ('+ex.tripId+')'):''}</span><span style="display:flex;gap:5px;align-items:center">${fmt(ex.amount)}${photoBtn}</span></div>`;
+          }).join('')}`:''}
         </div>`:''}`;
       // Rincian barang: berat, harga, & kelengkapan foto — utk transparansi & pengawasan admin
       if(tr.itemsDetail.length){
@@ -4594,7 +4724,7 @@ function renderPembukuan(){
     });
     h+=`</div>`;
   });
-  h+=monthlyBreakdownHTML();
+  if(!hasSpecificFilter) h+=monthlyBreakdownHTML(); // sembunyikan saat filter kurir/rute spesifik aktif — fokus hanya pada yang dipilih
   el.innerHTML=h;
 }
 // ── 📅 RINGKASAN BULANAN — revenue, cukai masuk/keluar, profit per bulan ──
@@ -4822,10 +4952,16 @@ function openTripModal(docId){
     document.getElementById('t-wagroup').value=t.waGroupLink||'';
     document.getElementById('t-status').value=t.status||'open';
     document.getElementById('t-note').value=t.note||'';
+    document.getElementById('t-investor-on').checked=!!t.investorEnabled;
+    document.getElementById('t-investor-name').value=t.investorName||'';
+    document.getElementById('t-investor-percent').value=t.investorPercent!=null?t.investorPercent:'';
+    toggleInvestorFields(!!t.investorEnabled);
   }else{
-    ['t-courier','t-date','t-arrive','t-cap','t-cutoff','t-wagroup','t-note'].forEach(x=>{const e=document.getElementById(x);if(e)e.value='';});
+    ['t-courier','t-date','t-arrive','t-cap','t-cutoff','t-wagroup','t-note','t-investor-name','t-investor-percent'].forEach(x=>{const e=document.getElementById(x);if(e)e.value='';});
     document.getElementById('t-route').value='Cairo → Jakarta';
     document.getElementById('t-status').value='open';
+    document.getElementById('t-investor-on').checked=false;
+    toggleInvestorFields(false);
   }
   // Isi dropdown pasangan PP (trip lain, kecuali diri sendiri)
   const pairSel=document.getElementById('t-pairtrip');
@@ -4872,11 +5008,14 @@ function renderTripRates(trip){
   }).join('')||'<div style="font-size:11px;color:var(--muted)">Belum ada kategori. Atur di Setting dulu.</div>';
 }
 function toggleTripBulk(key,on){ var el=document.getElementById('trbulk-'+key); if(el) el.style.display=on?'flex':'none'; }
+function toggleInvestorFields(on){ const el=document.getElementById('t-investor-fields'); if(el) el.style.display=on?'block':'none'; }
 
 async function saveTrip(){
   const date=document.getElementById('t-date').value;
   if(!date){toast('Tanggal wajib diisi','err');return;}
   const pairDocId=document.getElementById('t-pairtrip')?.value||'';
+  const investorOn=document.getElementById('t-investor-on')?.checked||false;
+  const investorPercentRaw=parseFloat(document.getElementById('t-investor-percent')?.value);
   const data={
     route:document.getElementById('t-route').value,date,
     arrive:document.getElementById('t-arrive').value,
@@ -4886,6 +5025,9 @@ async function saveTrip(){
     waGroupLink:document.getElementById('t-wagroup').value.trim(),
     status:document.getElementById('t-status').value,
     note:document.getElementById('t-note').value.trim(),
+    investorEnabled:investorOn,
+    investorName:investorOn?(document.getElementById('t-investor-name')?.value.trim()||''):'',
+    investorPercent:investorOn?Math.max(0,Math.min(100,isNaN(investorPercentRaw)?0:investorPercentRaw)):0,
   };
   // Kumpulkan harga khusus per-trip. Borongan hanya disimpan jika toggle-nya ON.
   const _tr={}, _tbr={}, _tbm={}, _tba={}; const _cats=(cachedSettings&&cachedSettings.cats)||[];
@@ -5537,6 +5679,13 @@ async function renderRekap(){
       <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk (dari customer)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#4CAF7D">${fmtRp(cukaiIn)}</span></div>
       <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📤 Keluar (ke bea cukai)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#E8924A">${fmtRp(cukaiOut)}</span></div>
       <div class="rek-row" style="border-top:1px solid var(--border);margin-top:4px;padding-top:6px"><span style="color:var(--muted);font-size:11px">Selisih</span><span style="font-weight:800;font-family:'Space Mono',monospace;font-size:12px;color:${(cukaiIn-cukaiOut)>=0?'#4CAF7D':'#C0392B'}">${fmtRp(Math.abs(cukaiIn-cukaiOut))}</span></div>
+      <div style="border-top:1px dashed var(--border);margin-top:9px;padding-top:9px">
+        <div style="font-size:9px;font-weight:700;color:#4A9FD4;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🛂 Input Cukai Ditalangi (Cepat)</div>
+        <select id="cukai-quick-trip-r" style="width:100%;margin-bottom:6px;font-size:11px"><option value="">Pilih trip...</option>${(cachedTrips||[]).map(t=>`<option value="${t.id}">${t.id} · ${t.route} · ${t.courier||'-'}</option>`).join('')}</select>
+        <input type="number" id="cukai-quick-amount-r" placeholder="Jumlah ditalangi (Rp)" inputmode="numeric" style="width:100%;margin-bottom:6px">
+        <input type="text" id="cukai-quick-note-r" placeholder="Catatan (opsional)" style="width:100%;margin-bottom:6px">
+        <button class="btn btn-block" style="background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff;font-size:11px;padding:8px" onclick="quickAddCukai('r')">💾 Simpan Cukai Keluar</button>
+      </div>
     </div>
     <div class="rek-card" style="margin-bottom:8px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4A9FD4;letter-spacing:1px;margin-bottom:10px">📦 Kelengkapan Foto & Berat (${nItemsTotal} barang)</div>
@@ -5691,6 +5840,30 @@ function exportPembukuanLengkap(){
     Object.keys(byBulanCukai).sort().forEach(k=>{ const d=byBulanCukai[k]; L.push([k,rp(d.cin),rp(d.cout),rp(d.cin-d.cout)]); });
   }
   L.push([]);
+
+  // ══ BAGI HASIL INVESTOR — per trip yang modal tiketnya dari investor ══
+  const investorTrips=(cachedTrips||[]).filter(t=>t.investorEnabled);
+  if(investorTrips.length){
+    L.push(['=== BAGI HASIL INVESTOR ===']);
+    L.push(['Trip','Rute','Kurir','Tanggal','Nama Investor','Persentase Investor (%)','Revenue (Rp)','Modal & Biaya Non-Cukai (Rp)','Komisi Affiliate (Rp)','Profit Trip Potensial (Rp)','Bagian Investor Potensial (Rp)','Bagian Owner Potensial (Rp)','Profit Terkonfirmasi/Lunas (Rp)','Bagian Investor Terkonfirmasi (Rp)','Bagian Owner Terkonfirmasi (Rp)']);
+    investorTrips.forEach(t=>{
+      const tOrders=(cachedOrders||[]).filter(o=>o.tripId===t.id && o.status!=='cancelled');
+      const rev=tOrders.reduce((s,o)=>s+orderRevenue(o),0);
+      const revPaid=tOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+orderRevenue(o),0);
+      const cost=(cachedExpenses||[]).filter(e=>e.tripId===t.id && e.type!=='cukai').reduce((s,e)=>s+(e.amount||0),0);
+      const comm=tOrders.reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
+      const commPaid=tOrders.filter(o=>o.payStatus==='lunas').reduce((s,o)=>s+(o.referral&&o.referral.code?(parseFloat(o.referral.commissionPerKg)||0)*orderKg(o):0),0);
+      const profit=rev-cost-comm;
+      const profitConfirmed=revPaid-cost-commPaid;
+      const pct=t.investorPercent||0;
+      const investorShare=profit*(pct/100), ownerShare=profit-investorShare;
+      const investorShareConfirmed=profitConfirmed*(pct/100), ownerShareConfirmed=profitConfirmed-investorShareConfirmed;
+      L.push([t.id, t.route||'', t.courier||'', t.date||'', t.investorName||'(belum diisi)', pct,
+        rp(rev), rp(cost), rp(comm), rp(profit), rp(investorShare), rp(ownerShare),
+        rp(profitConfirmed), rp(investorShareConfirmed), rp(ownerShareConfirmed)]);
+    });
+    L.push([]);
+  }
 
   const profit=tRevenue-tExp-tComm;
   L.push(['=== RINGKASAN TOTAL ===']);
