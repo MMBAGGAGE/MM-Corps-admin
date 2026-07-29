@@ -114,6 +114,15 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
 .btn-wa{background:linear-gradient(135deg,#075E54,#25D366);color:#fff}
 .btn-ghost{background:var(--dark4);color:var(--cream3);border:1px solid var(--border2)}
 .btn-teal{background:linear-gradient(135deg,var(--teal),var(--teal2));color:#fff}
+/* KOREKSI: .btn-dark dipakai di markup (mis. tombol "Semua Kontak") tapi
+   TIDAK PERNAH didefinisikan — jatuh ke tombol putih bawaan iOS. */
+.btn-dark{background:var(--dark4);color:var(--cream3);border:1px solid var(--border2)}
+/* KOREKSI: select yang TIDAK dibungkus .field (mis. filter Trip/Kurir/
+   Pengambilan di halaman Order) tidak dapat styling apa pun → jatuh ke
+   tampilan putih bawaan iOS Safari. Aturan fallback global ini menjamin
+   SEMUA <select> di mana pun ikut tema gelap-emas, bukan cuma yg di dalam .field. */
+select{background:var(--dark4);border:1px solid var(--border2);border-radius:9px;color:var(--cream);font-family:'Inter',sans-serif;-webkit-appearance:none;outline:none;padding:9px 10px}
+select option{background:var(--dark3);color:var(--cream)}
 .btn-orange{background:rgba(232,146,74,0.15);color:#E8924A;border:1px solid rgba(232,146,74,.2)}
 .btn-block{width:100%;padding:12px;font-size:13px;border-radius:11px;margin-top:8px;font-family:'Inter',sans-serif}
 
@@ -282,7 +291,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v27 · invoice sbg acuan utama revenue</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v28 · dashboard sinkron & fix tombol putih</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1644,12 +1653,18 @@ function renderDashboard(){
   const pending=cachedOrders.filter(o=>o.status==='pending');
   const active=cachedOrders.filter(o=>!['delivered','cancelled','pending'].includes(o.status));
   const delivered=cachedOrders.filter(o=>o.status==='delivered');
-  const revenue=delivered.reduce((s,o)=>s+orderRevenue(o),0);
+  // KOREKSI: sebelumnya Revenue di sini HANYA dari order berstatus "Selesai",
+  // padahal angka utama "Omzet/Revenue" di Pembukuan (LAPORAN 1 · BAGASI)
+  // menjumlahkan SEMUA order aktif yang punya trip (bukan cuma yang selesai).
+  // Dua cakupan berbeda ini yang membuat angka Dashboard tidak pernah sama
+  // dgn Pembukuan. Disamakan sekarang: cakupan PERSIS sama dgn grandRev di
+  // Pembukuan (semua order non-batal yg punya trip, "Semua Waktu").
+  const revenue=(cachedOrders||[]).filter(o=>o.status!=='cancelled' && o.tripId).reduce((s,o)=>s+orderRevenue(o),0);
   document.getElementById('stat-grid').innerHTML=`
     <div class="stat-card"><div class="stat-num">${pending.length}</div><div class="stat-lbl">⏳ Pending</div></div>
     <div class="stat-card"><div class="stat-num">${active.length}</div><div class="stat-lbl">✈️ Aktif</div></div>
     <div class="stat-card"><div class="stat-num">${delivered.length}</div><div class="stat-lbl">✅ Selesai</div></div>
-    <div class="stat-card"><div class="stat-num" style="font-size:13px">${fmtRp(revenue)}</div><div class="stat-lbl">💰 Revenue</div></div>`;
+    <div class="stat-card"><div class="stat-num" style="font-size:13px">${fmtRp(revenue)}</div><div class="stat-lbl">💰 Revenue (= Pembukuan)</div></div>`;
   const el=document.getElementById('pending-list');
   el.innerHTML=pending.length?pending.slice(0,5).map(o=>orderCardHTML(o)).join(''):'<div class="empty">Tidak ada order pending 🎉</div>';
   renderRatings();
