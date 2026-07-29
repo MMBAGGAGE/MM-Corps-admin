@@ -291,7 +291,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v32 · fix bug foto menggantikan · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v33 · fix modal macet & foto hilang · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -972,6 +972,16 @@ function updateOrderBadge(){
 let _scrollLockY=0, _scrollLockDepth=0;
 function openModal(id){
   const el=document.getElementById(id); if(!el) return;
+  // KOREKSI BUG SERIUS: sebelumnya fungsi ini SELALU menaikkan
+  // _scrollLockDepth setiap dipanggil — TERMASUK saat modal yang SAMA
+  // dipanggil lagi PADAHAL SUDAH TERBUKA (mis. lewat _refreshItemPhotoModal
+  // sbg jalur cadangan saat wrapper galeri foto tidak ketemu). Penghitung
+  // naik tanpa pernah turun seimbang → begitu modal ditutup normal (1x
+  // closeModal), _scrollLockDepth TIDAK PERNAH balik ke 0 → body tetap
+  // position:fixed selamanya → halaman terkunci, tidak bisa discroll, harus
+  // di-refresh paksa. Sekarang: kalau modal ITU SENDIRI sudah 'open', panggilan
+  // ulang TIDAK menaikkan penghitung lagi — cuma memastikan class 'open' tetap ada.
+  if(el.classList.contains('open')) return;
   if(_scrollLockDepth===0){
     _scrollLockY=window.scrollY||document.documentElement.scrollTop||0;
     document.body.style.position='fixed';
@@ -987,7 +997,15 @@ function closeModal(id){
   const el=document.getElementById(id); if(!el) return;
   el.classList.remove('open');
   _scrollLockDepth=Math.max(0,_scrollLockDepth-1);
-  if(_scrollLockDepth===0){
+  // JARING PENGAMAN: kalau ternyata SUDAH TIDAK ADA modal lain yang benar-
+  // benar terbuka (class 'open'), paksa kembalikan scroll normal APA PUN nilai
+  // _scrollLockDepth saat ini — supaya kalau suatu saat ada bug lain yang
+  // membuat penghitung ini tidak seimbang lagi, halaman tidak akan terkunci
+  // permanen dan butuh refresh paksa. Ini pengaman tambahan, bukan pengganti
+  // perbaikan akar masalah di openModal().
+  const anyStillOpen=document.querySelectorAll('.modal-overlay.open').length>0;
+  if(_scrollLockDepth===0 || !anyStillOpen){
+    _scrollLockDepth=0;
     document.body.style.position='';
     document.body.style.top='';
     document.body.style.left='';
@@ -1617,7 +1635,29 @@ async function saveDropPoints(){
 function loadData(){
   // Real-time listener untuk orders
   db.collection('orders').orderBy('createdAt','desc').onSnapshot(snap=>{
-    cachedOrders=snap.docs.map(d=>({id:d.id,...d.data()}));
+    // JARING PENGAMAN: snapshot Firestore bisa datang KAPAN SAJA (dipicu
+    // penulisan APA PUN di koleksi orders, dari device/proses manapun) —
+    // termasuk PERSIS saat admin sedang menambah beberapa foto timbangan
+    // sekaligus tapi BELUM sempat klik "Simpan". Sebelumnya cachedOrders
+    // diganti TOTAL dgn objek baru dari server, sehingga foto yang baru
+    // ditambahkan LOKAL (belum tersimpan) ikut hilang tanpa jejak. Sekarang:
+    // kalau versi LOKAL (belum tersimpan) punya LEBIH BANYAK foto timbangan
+    // drpd versi server yg baru datang, pertahankan foto lokal itu.
+    const prevById={}; (cachedOrders||[]).forEach(o=>{ prevById[o.id]=o; });
+    cachedOrders=snap.docs.map(d=>{
+      const fresh={id:d.id,...d.data()};
+      const prev=prevById[fresh.id];
+      if(prev && Array.isArray(prev.items) && Array.isArray(fresh.items) && prev.items.length===fresh.items.length){
+        fresh.items=fresh.items.map((freshIt,i)=>{
+          const prevIt=prev.items[i]; if(!prevIt) return freshIt;
+          const prevPhotos=(Array.isArray(prevIt.scalePhotos)&&prevIt.scalePhotos.length)?prevIt.scalePhotos:(prevIt.scalePhoto?[prevIt.scalePhoto]:[]);
+          const freshPhotos=(Array.isArray(freshIt.scalePhotos)&&freshIt.scalePhotos.length)?freshIt.scalePhotos:(freshIt.scalePhoto?[freshIt.scalePhoto]:[]);
+          if(prevPhotos.length>freshPhotos.length) return {...freshIt, scalePhotos:prevPhotos, scalePhoto:prevPhotos[0]};
+          return freshIt;
+        });
+      }
+      return fresh;
+    });
     // === DETEKSI NOTIFIKASI (persisten via localStorage) ===
     // Tetap memunculkan notif untuk perubahan yang masuk selama app sempat ditutup.
     detectAndNotify(cachedOrders);
