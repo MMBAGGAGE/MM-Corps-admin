@@ -291,7 +291,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v33 · fix modal macet & foto hilang · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v37 · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -472,6 +472,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- ANALISIS BISNIS -->
   <div id="page-analisis" class="page">
     <div class="sec-ttl">📊 Analisis Bisnis &amp; Marketing <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="exportAnalisisCSV()">📊 CSV</button></div>
+    <button class="btn btn-block" style="background:linear-gradient(135deg,#8B6914,#D4A017);color:#1a1508;font-weight:800;margin-bottom:10px" onclick="exportAnalisisProfesional()">📈 Export Laporan Analisis Profesional (Grafik + Insight)</button>
     <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px">Analisis data customer untuk landasan keputusan marketing. Angka dihitung dari order yang <strong>tidak dibatalkan</strong>; revenue hanya dari barang yang <strong>disetujui</strong>.</p>
     <div class="field"><label>Periode</label><select id="an-period" onchange="renderAnalisis()">
       <option value="all">Semua Waktu</option>
@@ -2113,6 +2114,56 @@ function deleteAdminItem(orderId, idx){
   }).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
 }
 // === #3 FLEKSIBEL: admin tambah barang baru yang dikirim tapi tak didaftarkan customer ===
+// ── TAMBAH JENIS BARANG DI INVOICE (Aktualisasi) ──
+// Beda dgn addAdminItem (Kelola) yg menambah placeholder generik "Tambahan
+// Admin" berharga 0 (perlu diisi manual semua) — ini memilih LANGSUNG dari
+// daftar kategori & harga yang SUDAH ditetapkan admin di Setting, supaya
+// admin tinggal pilih jenis barang + masukkan berat/qty AKTUAL, harga
+// otomatis terisi (tetap bisa diedit). Ini yg membedakan Kelola (estimasi)
+// vs Invoice (aktualisasi): di sini barang baru langsung berdasar harga real.
+function showAddInvoiceItemPicker(orderId){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const allCats=(cachedSettings.cats||[]).filter(c=>!c.routes || c.routes.indexOf(o.route)>=0);
+  const wrap=document.getElementById('add-invoice-item-picker'); if(!wrap) return;
+  wrap.innerHTML=`<div style="background:rgba(212,168,76,.06);border:1px solid rgba(212,168,76,.3);border-radius:9px;padding:10px;margin-bottom:12px">
+    <div class="field" style="margin:0 0 8px"><label>Jenis Barang</label>
+      <select id="new-inv-item-cat" onchange="updateNewInvItemRateHint()">
+        ${allCats.map(c=>`<option value="${c.key}">${c.label} (${fmtRp(cachedSettings.rates?.[c.key]||0)}/${c.type||'kg'})</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin:0 0 8px"><label>Berat/Qty Aktual</label><input type="number" id="new-inv-item-qty" placeholder="0" step="0.01" inputmode="decimal"></div>
+    <div style="font-size:9px;color:var(--muted);margin-bottom:8px" id="new-inv-item-rate-hint"></div>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="commitAddInvoiceItem('${orderId}')">✅ Tambahkan</button>
+      <button type="button" class="btn btn-block btn-ghost" onclick="document.getElementById('add-invoice-item-picker').innerHTML=''">Batal</button>
+    </div>
+  </div>`;
+  updateNewInvItemRateHint();
+}
+function updateNewInvItemRateHint(){
+  const sel=document.getElementById('new-inv-item-cat'); if(!sel) return;
+  const cat=(cachedSettings.cats||[]).find(c=>c.key===sel.value);
+  const hint=document.getElementById('new-inv-item-rate-hint');
+  if(hint && cat) hint.textContent='Harga ditetapkan admin: '+fmtRp(cachedSettings.rates?.[cat.key]||0)+'/'+(cat.type||'kg')+' — bisa diedit setelah ditambahkan.';
+}
+function commitAddInvoiceItem(orderId){
+  if(!guard('addinvitem-'+orderId,600)) return;
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const catKey=document.getElementById('new-inv-item-cat')?.value;
+  const qty=parseFloat(document.getElementById('new-inv-item-qty')?.value)||0;
+  if(!catKey){ toast('Pilih jenis barang dulu','err'); return; }
+  if(qty<=0){ toast('Isi berat/qty aktual dulu','err'); return; }
+  const cat=(cachedSettings.cats||[]).find(c=>c.key===catKey);
+  const rate=cachedSettings.rates?.[catKey]||0;
+  const items=[...(o.items||[])];
+  items.push({cat:cat?cat.label:catKey, type:(cat&&cat.type)||'kg', qty, rate, actQty:qty, actRate:rate, desc:'', status:'approved', adminByAdmin:true, adminNote:'Ditambahkan admin saat Invoice (aktualisasi)'});
+  o.items=items;
+  recalcTotalFinal(o);
+  document.getElementById('add-invoice-item-picker').innerHTML='';
+  openInvoiceModal(orderId); // re-render supaya barang baru langsung terlihat
+  toast('✅ Barang baru ditambahkan ke Invoice','ok');
+  db.collection('orders').doc(orderId).update({items, totalFinal:o.totalFinal, totalFinalOverride:false}).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+}
 function addAdminItem(orderId){
   if(!guard('additem-'+orderId,600)) return;
   const o=cachedOrders.find(x=>x.id===orderId); if(!o) return;
@@ -2362,6 +2413,10 @@ function openInvoiceModal(id){
         <div class="field" style="margin:0"><label>Aktual <span id="ivunitlbl-${realIdx}">${unit}</span></label><input type="number" id="ivq-${realIdx}" value="${it.actQty??it.qty}" step="0.01" oninput="calcInv()" inputmode="decimal"></div>
         <div class="field" style="margin:0"><label>Harga/<span id="ivunitlbl2-${realIdx}">${unit}</span>${needsPrice?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ivr-${realIdx}" value="${rateVal}" placeholder="${it.adminPriced?'wajib isi':''}" style="${needsPrice?'border:2px solid #D4A017':''}" oninput="calcInv()" inputmode="numeric"></div>
       </div>
+      <div class="field" style="margin:0 0 8px;background:rgba(74,159,212,.06);border:1px solid rgba(74,159,212,.2);border-radius:7px;padding:7px 9px">
+        <label style="color:#4A9FD4;font-size:10px">🧮 Rate Cukai/<span id="ivcukaiunitlbl-${realIdx}">${unit}</span> (Rp, opsional — kosongkan jika tidak kena cukai)</label>
+        <input type="number" id="ivcukairate-${realIdx}" value="${it.cukaiRate||''}" placeholder="mis. 60000" oninput="calcInv()" inputmode="numeric">
+      </div>
       ${scaleGalleryHTML(o.id, realIdx, scalePhotosOf(it))}
     </div>`;
   }).join('');
@@ -2369,7 +2424,13 @@ function openInvoiceModal(id){
   document.getElementById('invoice-form').innerHTML=`
     <div style="font-size:11px;color:var(--muted);margin-bottom:10px;padding:8px 10px;background:var(--dark4);border-radius:8px">🧾 <strong style="color:var(--cream3)">${nCustomer}</strong> barang sesuai pesanan customer${nAdmin?` · <strong style="color:#D4A017">${nAdmin}</strong> barang tambahan admin`:''}</div>
     ${itemsHTML}
-    <div class="field"><label>Biaya Cukai / Pajak (Rp)</label><input type="number" id="iv-cukai" value="${o.cukaiAmount||0}" inputmode="numeric" oninput="calcInv()"></div>
+    <button type="button" class="btn btn-block" onclick="showAddInvoiceItemPicker('${o.id}')" style="background:transparent;border:1px dashed var(--gold3);color:var(--gold3);padding:9px;font-size:11px;margin-bottom:12px">➕ Tambah Jenis Barang (Aktualisasi)</button>
+    <div id="add-invoice-item-picker"></div>
+    <div class="field" style="background:rgba(74,159,212,.05);border:1px solid rgba(74,159,212,.2);border-radius:8px;padding:9px 10px">
+      <label>🧮 Total Cukai / Pajak (Rp)</label>
+      <input type="number" id="iv-cukai" value="${o.cukaiAmount||0}" inputmode="numeric" oninput="calcInv()">
+      <div style="font-size:9px;color:var(--muted);margin-top:5px;line-height:1.5">Otomatis terisi dari rate cukai per barang di atas (kalau diisi) — tapi tetap bisa disesuaikan manual di sini kalau perlu.</div>
+    </div>
     <div class="field"><label>Catatan Invoice</label><input type="text" id="iv-note" value="${o.invoiceNote||''}" placeholder="Catatan tambahan..."></div>
     <div class="inv-preview">
       <div style="display:flex;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:10px">
@@ -2403,6 +2464,12 @@ function setInvUnit(idx,unit){
 function calcInv(){
   const o=cachedOrders.find(x=>x.id===editOrderId);if(!o)return;
   let total=0;const rows=[];
+  // 🧮 Kalkulator cukai per barang (per kg/pcs sesuai satuan masing-masing) —
+  // kalau admin isi RATE cukai di salah satu barang, total cukai OTOMATIS
+  // dihitung dari sini (menjumlahkan actual qty × rate cukai tiap barang).
+  // Kalau tidak ada satu pun rate cukai diisi, field Total Cukai tetap bisa
+  // diisi manual seperti sebelumnya — tidak mengubah perilaku lama.
+  let cukaiFromCalc=0, anyCukaiRateSet=false;
   (o.items||[]).forEach((it,i)=>{
     if(it.status==='rejected'||it.status==='cancel_requested') return; // tidak masuk invoice
     const qEl=document.getElementById('ivq-'+i), rEl=document.getElementById('ivr-'+i);
@@ -2411,9 +2478,16 @@ function calcInv(){
     const r=parseFloat(rEl.value)||0;
     total+=q*r;
     rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">${catDisplayName(it)} (${q} ${it.type||'kg'})</span><span style="font-weight:700">${fmtRp(q*r)}</span></div>`);
+    const cRateEl=document.getElementById('ivcukairate-'+i);
+    if(cRateEl && cRateEl.value!==''){
+      const cRate=parseFloat(cRateEl.value)||0;
+      if(cRate>0){ anyCukaiRateSet=true; cukaiFromCalc+=q*cRate; }
+    }
   });
-  const cukai=parseFloat(document.getElementById('iv-cukai')?.value)||0;
-  if(cukai){total+=cukai;rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">Cukai / Pajak</span><span style="font-weight:700">${fmtRp(cukai)}</span></div>`);}
+  const cukaiInput=document.getElementById('iv-cukai');
+  if(anyCukaiRateSet && cukaiInput) cukaiInput.value=Math.round(cukaiFromCalc);
+  const cukai=parseFloat(cukaiInput?.value)||0;
+  if(cukai){total+=cukai;rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">Cukai / Pajak${anyCukaiRateSet?' (dari kalkulator)':''}</span><span style="font-weight:700">${fmtRp(cukai)}</span></div>`);}
   const re=document.getElementById('inv-rows');if(re)re.innerHTML=rows.join('');
   const te=document.getElementById('inv-total');if(te)te.textContent=fmtRp(total);
   // Sinkronkan tagihan yang dilihat bagian Bukti TF — supaya invoice & pembayaran
@@ -3957,6 +4031,166 @@ function fillPembukuanFilterDropdowns(){
   }
   if(curK) selK.value=curK; if(curR) selR.value=curR;
 }
+// ══════════════════════════════════════════════════
+// 📊 LAPORAN ANALISIS PROFESIONAL — setara laporan analis perusahaan besar:
+// ringkasan eksekutif, grafik tren, tabel top customer/kategori/rute, dan
+// insight otomatis (kalimat kesimpulan, bukan cuma angka mentah). File HTML
+// (bukan CSV) supaya diagram & warna benar-benar tampil visual saat dibuka.
+// Memakai primitif yg SAMA dgn tampilan layar (orderRevenue/orderKg/anCollect)
+// supaya angkanya selalu konsisten dgn apa yang terlihat di Analisis.
+// ══════════════════════════════════════════════════
+function exportAnalisisProfesional(){
+  const period=document.getElementById('an-period')?document.getElementById('an-period').value:'all';
+  const periodLabel={all:'Semua Waktu',month:'Bulan Ini','30':'30 Hari Terakhir','90':'3 Bulan Terakhir','180':'6 Bulan Terakhir','365':'1 Tahun Terakhir'}[period]||period;
+  const frp=n=>'Rp '+Math.round(n||0).toLocaleString('id-ID');
+  const orders=anCollect(period);
+
+  const totalRev=orders.reduce((s,o)=>s+orderRevenue(o),0);
+  const totalKg=orders.reduce((s,o)=>s+orderKg(o),0);
+  const aov=orders.length?(totalRev/orders.length):0;
+
+  // Top kategori
+  const byCat={};
+  orders.forEach(o=>(o.items||[]).forEach(it=>{
+    if(it.status!=='approved') return;
+    const k=catDisplayName(it);
+    byCat[k]=byCat[k]||{rev:0,kg:0,n:0};
+    const q=(it.actQty!=null?it.actQty:it.qty)||0, r=(it.actRate!=null?it.actRate:it.rate)||0;
+    byCat[k].rev+=q*r; byCat[k].kg+=itemBeratKg(it); byCat[k].n++;
+  }));
+  const topCats=Object.entries(byCat).map(([k,v])=>({cat:k,...v})).sort((a,b)=>b.rev-a.rev).slice(0,8);
+
+  // Top rute
+  const byRoute={};
+  orders.forEach(o=>{ const k=o.route||'-'; byRoute[k]=byRoute[k]||{rev:0,kg:0,n:0}; byRoute[k].rev+=orderRevenue(o); byRoute[k].kg+=orderKg(o); byRoute[k].n++; });
+  const topRoutes=Object.entries(byRoute).map(([k,v])=>({route:k,...v})).sort((a,b)=>b.rev-a.rev);
+
+  // Top customer
+  const byCust={};
+  orders.forEach(o=>{
+    const key=(o.phone||o.name||o.id).replace(/\D/g,'')||o.name||o.id;
+    byCust[key]=byCust[key]||{name:o.name||'-',rev:0,orders:0};
+    byCust[key].rev+=orderRevenue(o); byCust[key].orders++;
+  });
+  const topCust=Object.values(byCust).sort((a,b)=>b.rev-a.rev).slice(0,10);
+
+  // Tren bulanan (dalam rentang periode yg dipilih)
+  const byMonth={};
+  orders.forEach(o=>{ const k=_monthKey(o.ts||o.createdAt); byMonth[k]=byMonth[k]||{rev:0,kg:0,n:0}; byMonth[k].rev+=orderRevenue(o); byMonth[k].kg+=orderKg(o); byMonth[k].n++; });
+  const months=Object.keys(byMonth).sort();
+  const maxMonthRev=Math.max(1,...months.map(k=>byMonth[k].rev));
+
+  // Referral/affiliate
+  const byRef={};
+  orders.forEach(o=>{ if(!o.referral||!o.referral.code) return; const k=o.referral.code; byRef[k]=byRef[k]||{owner:o.referral.ownerName||'-',rev:0,kg:0,n:0}; byRef[k].rev+=orderRevenue(o); byRef[k].kg+=orderKg(o); byRef[k].n++; });
+  const topRef=Object.entries(byRef).map(([k,v])=>({code:k,...v})).sort((a,b)=>b.rev-a.rev);
+
+  // ── Insight otomatis (kalimat kesimpulan, bukan cuma angka) ──
+  const insights=[];
+  if(topCats.length){
+    const top1=topCats[0], totalCatRev=topCats.reduce((s,c)=>s+c.rev,0)||1;
+    insights.push(`Kategori dengan kontribusi omzet tertinggi adalah <strong>${top1.cat}</strong>, menyumbang ${frp(top1.rev)} (${Math.round(top1.rev/totalRev*100)}% dari total omzet periode ini).`);
+  }
+  if(topRoutes.length>1){
+    const top1=topRoutes[0];
+    insights.push(`Rute <strong>${top1.route}</strong> mendominasi dengan ${top1.n} order (${Math.round(top1.n/orders.length*100)}% dari total transaksi).`);
+  }
+  if(months.length>=2){
+    const lastM=byMonth[months[months.length-1]], prevM=byMonth[months[months.length-2]];
+    const growth=prevM.rev>0?((lastM.rev-prevM.rev)/prevM.rev*100):0;
+    insights.push(`Omzet bulan ${months[months.length-1]} ${growth>=0?'tumbuh':'menurun'} ${Math.abs(growth).toFixed(1)}% dibanding bulan sebelumnya (${frp(prevM.rev)} → ${frp(lastM.rev)}).`);
+  }
+  if(topCust.length){
+    const top1=topCust[0];
+    insights.push(`Customer dengan kontribusi tertinggi adalah <strong>${top1.name}</strong> dengan total belanja ${frp(top1.rev)} dari ${top1.orders} order.`);
+  }
+  if(topRef.length){
+    insights.push(`Program afiliasi aktif dengan ${topRef.length} kode referral, total kontribusi omzet ${frp(topRef.reduce((s,r)=>s+r.rev,0))}.`);
+  }
+  insights.push(`Rata-rata nilai per order (AOV) periode ini: ${frp(aov)}, dari total ${orders.length} transaksi dan ${totalKg.toFixed(1)} kg barang terkirim.`);
+
+  const barRow=(label,val,max,extra)=>{
+    const w=Math.max(2,Math.round(val/max*100));
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#3a2f1a;font-weight:700;margin-bottom:3px"><span>${label}</span><span>${extra||frp(val)}</span></div>
+      <div style="background:#e8dfc8;border-radius:5px;height:14px;overflow:hidden"><div style="background:linear-gradient(90deg,#8B6914,#D4A017);height:100%;width:${w}%"></div></div>
+    </div>`;
+  };
+
+  const html=`<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Laporan Analisis — M.M Baggage</title>
+  <style>
+    body{font-family:-apple-system,Segoe UI,Arial,sans-serif;background:#faf6ec;color:#2a2416;max-width:720px;margin:0 auto;padding:24px 18px}
+    .letterhead{text-align:center;border-bottom:3px solid #D4A017;padding-bottom:14px;margin-bottom:20px}
+    .letterhead h1{margin:0;color:#8B6914;font-size:22px}
+    .letterhead p{margin:4px 0 0;color:#6b6152;font-size:12px}
+    .card{background:#fff;border:1px solid #e8dfc8;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+    .card h2{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#8B6914}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .stat-label{font-size:11px;color:#6b6152;margin-bottom:2px}
+    .stat-value{font-size:17px;font-weight:800;color:#2a2416}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th{text-align:left;color:#6b6152;font-weight:700;padding:5px 6px;border-bottom:2px solid #e8dfc8;font-size:10px;text-transform:uppercase}
+    td{padding:6px;border-bottom:1px solid #f0ebd8}
+    .insight{background:#fff8e8;border-left:3px solid #D4A017;padding:9px 12px;border-radius:6px;margin-bottom:8px;font-size:12px;line-height:1.6}
+    .footer{text-align:center;font-size:10px;color:#999;margin-top:20px}
+  </style></head>
+  <body>
+    <div class="letterhead">
+      <h1>M.M BAGGAGE — LAPORAN ANALISIS BISNIS</h1>
+      <p>Periode: <strong>${periodLabel}</strong> · Diterbitkan ${new Date().toLocaleString('id-ID')}</p>
+    </div>
+
+    <div class="card">
+      <h2>📊 Ringkasan Eksekutif</h2>
+      <div class="grid">
+        <div><div class="stat-label">Total Omzet</div><div class="stat-value">${frp(totalRev)}</div></div>
+        <div><div class="stat-label">Total Berat Terkirim</div><div class="stat-value">${totalKg.toFixed(1)} kg</div></div>
+        <div><div class="stat-label">Jumlah Transaksi</div><div class="stat-value">${orders.length}</div></div>
+        <div><div class="stat-label">Rata-rata Nilai Order (AOV)</div><div class="stat-value">${frp(aov)}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>💡 Insight & Kesimpulan Analis</h2>
+      ${insights.map(t=>`<div class="insight">${t}</div>`).join('')}
+    </div>
+
+    <div class="card">
+      <h2>📈 Tren Omzet Bulanan</h2>
+      ${months.map(k=>barRow(k, byMonth[k].rev, maxMonthRev, frp(byMonth[k].rev)+' · '+byMonth[k].n+' order')).join('') || '<p style="color:#999;font-size:12px">Belum ada data.</p>'}
+    </div>
+
+    <div class="card">
+      <h2>📦 Kategori Barang Terlaris (by Omzet)</h2>
+      ${topCats.map(c=>barRow(c.cat, c.rev, topCats[0]?.rev||1, frp(c.rev)+' · '+c.kg.toFixed(1)+'kg · '+c.n+' order')).join('') || '<p style="color:#999;font-size:12px">Belum ada data.</p>'}
+    </div>
+
+    <div class="card">
+      <h2>🗺️ Distribusi per Rute</h2>
+      <table><tr><th>Rute</th><th>Order</th><th>Berat</th><th>Omzet</th></tr>
+        ${topRoutes.map(r=>`<tr><td>${r.route}</td><td>${r.n}</td><td>${r.kg.toFixed(1)}kg</td><td><strong>${frp(r.rev)}</strong></td></tr>`).join('')}
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>👑 Top 10 Customer</h2>
+      <table><tr><th>#</th><th>Nama</th><th>Order</th><th>Total Belanja</th></tr>
+        ${topCust.map((c,i)=>`<tr><td>${i+1}</td><td>${c.name}</td><td>${c.orders}</td><td><strong>${frp(c.rev)}</strong></td></tr>`).join('')}
+      </table>
+    </div>
+
+    ${topRef.length?`<div class="card">
+      <h2>🤝 Performa Program Afiliasi</h2>
+      <table><tr><th>Kode</th><th>Pemilik</th><th>Order</th><th>Omzet Dihasilkan</th></tr>
+        ${topRef.map(r=>`<tr><td>${r.code}</td><td>${r.owner}</td><td>${r.n}</td><td><strong>${frp(r.rev)}</strong></td></tr>`).join('')}
+      </table>
+    </div>`:''}
+
+    <div class="footer">Laporan ini dibuat otomatis oleh sistem M.M Baggage berdasarkan data invoice/order teraktualisasi. Order yang dibatalkan tidak disertakan.</div>
+  </body></html>`;
+
+  saveHTMLFile(html, 'MMBaggage_Analisis_'+period+'_'+new Date().toISOString().slice(0,10)+'.html');
+}
 function fillAnalisisDropdowns(){
   const selT=document.getElementById('an-trip'), selK=document.getElementById('an-kurir');
   if(!selT||!selK) return;
@@ -4285,6 +4519,77 @@ function markAuditReviewed(id){
   toast('✓ Ditandai sudah ditinjau','ok');
 }
 function toggleAuditShowReviewed(){ _auditShowReviewed=!_auditShowReviewed; renderPembukuan(); }
+// ══════════════════════════════════════════════════
+// 🔍 AUDIT KESESUAIAN: BERAT & PEMBAYARAN — panel KHUSUS, terpisah dari Audit
+// Otomatis umum, fokus SEMPIT pada 2 hal yang diminta: (1) keselarasan foto
+// timbangan vs berat aktual PER BARANG (kg dan pcs dihitung terpisah sesuai
+// satuannya sendiri — tidak pernah dicampur meski 1 order berisi beberapa
+// jenis barang berbeda), dan (2) keselarasan foto bukti TF vs total tagihan
+// yang harus diterima. Disajikan sbg satu panel utuh yg gampang dibaca,
+// bukan cuma flag tersebar di Audit Otomatis.
+// ══════════════════════════════════════════════════
+function auditKesesuaianHTML(period){
+  const fmt=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
+  const orders=(cachedOrders||[]).filter(o=>o.status!=='cancelled' && periodFilter(o.ts||o.createdAt||Date.now(), period));
+
+  // ── A. KESELARASAN TIMBANGAN — per barang, satuan asli masing-masing ──
+  let itemsChecked=0, itemsWithPhoto=0;
+  const itemIssues=[];
+  orders.forEach(o=>{
+    (o.items||[]).forEach((it,idx)=>{
+      if(it.status!=='approved') return;
+      itemsChecked++;
+      const photoCount=scalePhotosOf(it).length;
+      if(photoCount>0) itemsWithPhoto++;
+      const declared=it.qty||0;
+      const actual=it.actQty!=null?it.actQty:it.qty;
+      const diffPct=declared>0?Math.abs(actual-declared)/declared*100:0;
+      if(diffPct>=15 && photoCount===0){
+        itemIssues.push({orderId:o.id, orderCode:o.code||o.id, orderName:o.name||'-', idx, cat:catDisplayName(it), type:it.type||'kg', declared, actual, diffPct});
+      }
+    });
+  });
+
+  // ── B. KESELARASAN BUKTI TF — per pembayaran, vs tagihan invoice ──
+  let paysChecked=0, paysWithPhoto=0;
+  const payIssues=[];
+  (cachedPayments||[]).forEach(p=>{
+    if(!periodFilter(p.ts||Date.now(), period)) return;
+    const oo=orders.find(o=>o.id===p.orderId); if(!oo) return;
+    paysChecked++;
+    const photoCount=paymentProofsOf(p).length;
+    if(photoCount>0) paysWithPhoto++;
+    const tagihan=(oo.totalFinal&&oo.totalFinal>0)?oo.totalFinal:orderRevenue(oo);
+    const diff=(p.amount||0)-tagihan;
+    if(photoCount===0 || Math.abs(diff)>=1000){
+      payIssues.push({orderId:p.orderId, code:p.code||p.orderId, name:p.name||oo.name||'-', amount:p.amount||0, tagihan, diff, photoCount});
+    }
+  });
+
+  const semuaBeres=itemIssues.length===0 && payIssues.length===0;
+  const itemRows=itemIssues.map(x=>`<div style="background:var(--dark4);border-left:2px solid #D4A017;border-radius:6px;padding:7px 9px;margin-bottom:5px">
+    <div style="font-size:10px;color:var(--cream3)">${x.orderCode} (${x.orderName}) · <strong>${x.cat}</strong></div>
+    <div style="font-size:9px;color:#D4A017;margin-top:2px">Deklarasi ${x.declared}${x.type} → Aktual ${x.actual}${x.type} (selisih ${x.diffPct.toFixed(0)}%) — TANPA foto timbangan
+      <button onclick="pickScalePhoto('${x.orderId}',${x.idx})" style="margin-left:4px;background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:5px;padding:1px 6px;font-size:9px;cursor:pointer">+ Foto</button>
+    </div>
+  </div>`).join('');
+  const payRows=payIssues.map(x=>`<div style="background:var(--dark4);border-left:2px solid ${x.photoCount===0?'#D4504A':'#D4A017'};border-radius:6px;padding:7px 9px;margin-bottom:5px">
+    <div style="font-size:10px;color:var(--cream3)">${x.code} (${x.name})</div>
+    <div style="font-size:9px;color:${x.photoCount===0?'#D4504A':'#D4A017'};margin-top:2px">${x.photoCount===0?'⚠️ TANPA bukti TF sama sekali':'Bukti TF ada ('+x.photoCount+' foto)'} · Dibayar ${fmt(x.amount)} vs Tagihan ${fmt(x.tagihan)}${Math.abs(x.diff)>=1000?' (selisih '+fmt(Math.abs(x.diff))+')':''}</div>
+  </div>`).join('');
+
+  return `<div class="sec-card" style="margin-bottom:14px;border:1.5px solid ${semuaBeres?'rgba(76,175,125,.4)':'rgba(212,160,23,.4)'}">
+    <div style="font-size:10px;font-weight:800;text-transform:uppercase;color:${semuaBeres?'#4CAF7D':'#D4A017'};letter-spacing:1px;margin-bottom:8px">🔍 Audit Kesesuaian: Berat & Pembayaran ${semuaBeres?'✅':'⚠️'}</div>
+    <div style="font-size:9px;color:var(--muted);margin-bottom:10px;line-height:1.5">Mengecek PER BARANG (kg dan pcs dihitung terpisah sesuai satuan masing-masing, tidak pernah tercampur meski satu order berisi beberapa jenis) dan PER PEMBAYARAN.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="background:var(--dark4);border-radius:8px;padding:9px"><div style="font-size:9px;color:var(--muted)">⚖️ Barang dgn Foto Timbangan</div><div style="font-size:15px;font-weight:800;color:${itemsWithPhoto<itemsChecked?'#D4A017':'#4CAF7D'}">${itemsWithPhoto}/${itemsChecked}</div></div>
+      <div style="background:var(--dark4);border-radius:8px;padding:9px"><div style="font-size:9px;color:var(--muted)">💵 Pembayaran dgn Bukti TF</div><div style="font-size:15px;font-weight:800;color:${paysWithPhoto<paysChecked?'#D4A017':'#4CAF7D'}">${paysWithPhoto}/${paysChecked}</div></div>
+    </div>
+    ${itemIssues.length?`<div style="font-size:9px;font-weight:700;color:#D4A017;margin-bottom:5px;text-transform:uppercase">⚖️ Selisih Berat Signifikan Tanpa Foto (${itemIssues.length})</div>${itemRows}`:''}
+    ${payIssues.length?`<div style="font-size:9px;font-weight:700;color:#D4A017;margin:8px 0 5px;text-transform:uppercase">💵 Bukti/Selisih Pembayaran Perlu Dicek (${payIssues.length})</div>${payRows}`:''}
+    ${semuaBeres?'<div style="font-size:11px;color:#4CAF7D;text-align:center;padding:6px">✅ Semua barang & pembayaran punya bukti yang selaras.</div>':''}
+  </div>`;
+}
 function runAudit(period){
   const fmt=n=>'Rp'+Math.round(n||0).toLocaleString('id-ID');
   const flags=[];
@@ -4413,6 +4718,26 @@ function auditPanelHTML(flags){
 // tombol "Lihat Foto" yang membuka viewer yang SUDAH ADA (bukaFotoItem /
 // viewScalePhoto) — foto dimuat hanya saat benar-benar diminta.
 let _pembExpandedTrips=new Set();
+// ── Galeri foto bukti TF per pembayaran (bisa >1 foto) — toggle sama spt
+// _pembExpandedTrips, supaya konsisten dgn pola yg sudah ada.
+let _pembExpandedPayments=new Set();
+function togglePembPaymentPhotos(orderId){
+  if(_pembExpandedPayments.has(orderId)) _pembExpandedPayments.delete(orderId);
+  else _pembExpandedPayments.add(orderId);
+  renderPembukuan();
+}
+// Hapus 1 foto bukti TF tertentu (bukan seluruh pembayaran) — utk admin yg
+// salah upload/salah foto dan ingin mengoreksi tanpa menghapus SEMUA bukti.
+function deletePaymentProof(orderId, idx){
+  const p=orderPayment(orderId); if(!p) return;
+  const proofs=paymentProofsOf(p);
+  if(!confirm('Hapus foto bukti TF ke-'+(idx+1)+' dari '+proofs.length+'? Tindakan ini tidak bisa dibatalkan.')) return;
+  const newProofs=proofs.filter((_,i)=>i!==idx);
+  p.proofs=newProofs; p.proof=newProofs[0]||null;
+  renderPembukuan();
+  toast('🗑 Foto bukti TF ke-'+(idx+1)+' dihapus','err');
+  db.collection('payments').doc(orderId).update({proofs:newProofs, proof:newProofs[0]||null}).catch(function(e){ toast('Gagal hapus di server: '+e.message,'err'); });
+}
 function togglePembTripDetail(key){
   if(_pembExpandedTrips.has(key)) _pembExpandedTrips.delete(key);
   else _pembExpandedTrips.add(key);
@@ -4425,9 +4750,25 @@ function itemsDetailHTML(items){
     const custBtn = d.hasCustPhoto
       ? `<button onclick="bukaFotoItem('${d.orderId}',${d.idx})" style="background:rgba(76,175,125,.12);border:1px solid rgba(76,175,125,.3);color:#4CAF7D;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">📷 Foto Customer</button>`
       : `<span style="font-size:9px;color:#D4504A">tanpa foto customer</span>`;
-    const scaleBtn = d.hasScalePhoto
-      ? `<button onclick="viewScalePhoto('${d.orderId}',${d.idx})" style="background:rgba(74,159,212,.12);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">⚖️📷 Foto Timbangan</button>`
+    // KOREKSI BUG: sebelumnya HANYA foto timbangan PERTAMA yang bisa dibuka
+    // dari sini walau ada beberapa foto tersimpan. Sekarang toggle yg
+    // menampilkan SEMUA foto satu-per-satu (lihat/hapus), sama seperti bukti TF.
+    const scaleKey=d.orderId+'-'+d.idx;
+    const scaleExpanded=_pembExpandedScalePhotos.has(scaleKey);
+    const scaleBtn = d.scalePhotoCount
+      ? `<button onclick="togglePembScalePhotos('${d.orderId}',${d.idx})" style="background:rgba(74,159,212,.12);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:6px;padding:3px 8px;font-size:9px;font-weight:700;cursor:pointer">⚖️📷 Foto Timbangan (${d.scalePhotoCount})${scaleExpanded?' ▲':' ▼'}</button>`
       : `<span style="font-size:9px;color:#D4504A">tanpa foto timbangan</span>`;
+    let scaleGallery='';
+    if(scaleExpanded && d.scalePhotoCount){
+      const btns=[];
+      for(let pi=0; pi<d.scalePhotoCount; pi++){
+        btns.push(`<span style="display:inline-flex;align-items:center;gap:3px;margin:2px 5px 2px 0">
+          <button onclick="viewScalePhoto('${d.orderId}',${d.idx},${pi})" style="background:rgba(74,159,212,.12);border:1px solid rgba(74,159,212,.3);color:#4A9FD4;border-radius:5px;padding:2px 7px;font-size:9px;font-weight:700;cursor:pointer">⚖️ Foto ${pi+1}</button>
+          <button onclick="deleteScalePhotoFromPembukuan('${d.orderId}',${d.idx},${pi})" style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:5px;padding:2px 6px;font-size:9px;cursor:pointer">🗑</button>
+        </span>`);
+      }
+      scaleGallery=`<div style="padding-top:5px;display:flex;flex-wrap:wrap">${btns.join('')}</div>`;
+    }
     return `<div style="background:var(--dark3);border-radius:8px;padding:9px 10px;margin-bottom:6px;${diffWarn?'border-left:2px solid #D4A017':''}">
       <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:5px">
         <div style="min-width:0">
@@ -4437,9 +4778,32 @@ function itemsDetailHTML(items){
         <div style="text-align:right;flex-shrink:0"><div style="font-size:11px;font-weight:700;color:var(--gold)">${fmt(d.subtotal)}</div><div style="font-size:9px;color:var(--muted)">${fmt(d.rate)}/${d.type}</div></div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">${custBtn}${scaleBtn}</div>
+      ${scaleGallery}
     </div>`;
   }).join('');
   return `<div style="margin-top:7px">${rows}</div>`;
+}
+let _pembExpandedScalePhotos=new Set();
+function togglePembScalePhotos(orderId, idx){
+  const key=orderId+'-'+idx;
+  if(_pembExpandedScalePhotos.has(key)) _pembExpandedScalePhotos.delete(key);
+  else _pembExpandedScalePhotos.add(key);
+  renderPembukuan();
+}
+// Beda dgn removeScalePhotoAt (dipakai Kelola/Invoice, cuma staging — perlu
+// klik "Simpan" terpisah): Pembukuan BUKAN halaman edit, tidak ada tombol
+// Simpan sendiri — jadi hapus dari sini harus LANGSUNG tersimpan ke server.
+function deleteScalePhotoFromPembukuan(orderId, idx, photoIdx){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const it=(o.items||[])[idx]; if(!it) return;
+  const photos=scalePhotosOf(it);
+  if(!confirm('Hapus foto timbangan ke-'+(photoIdx+1)+' dari '+photos.length+'? Perubahan ini langsung tersimpan.')) return;
+  const newPhotos=photos.filter((_,pi)=>pi!==photoIdx);
+  it.scalePhotos=newPhotos; it.scalePhoto=newPhotos[0]||null;
+  if(!newPhotos.length) delete it.scalePhoto;
+  renderPembukuan();
+  toast('🗑 Foto timbangan dihapus','err');
+  db.collection('orders').doc(orderId).update({items:o.items}).catch(function(e){ toast('Gagal simpan ke server: '+e.message,'err'); });
 }
 function renderPembukuan(){
   const el=document.getElementById('pembukuan-result');
@@ -4499,7 +4863,7 @@ function renderPembukuan(){
         cat:catDisplayName(it), type:it.type||'kg', declared, actual,
         rate:(it.actRate!=null?it.actRate:it.rate)||0,
         subtotal:actual*((it.actRate!=null?it.actRate:it.rate)||0),
-        hasCustPhoto:!!it.photo, hasScalePhoto:!!it.scalePhoto,
+        hasCustPhoto:!!it.photo, scalePhotoCount:scalePhotosOf(it).length,
         weightDiffPct: declared>0 ? Math.abs(actual-declared)/declared*100 : 0,
         status:it.status,
       });
@@ -4642,6 +5006,7 @@ function renderPembukuan(){
     </div>`;
   }
   h+=auditPanelHTML(runAudit(period));
+  h+=auditKesesuaianHTML(period);
 
   // ══════════════════════════════════════════════════
   // LAPORAN 1 · BAGASI — omzet, biaya (TANPA cukai), profit jasa pengiriman
@@ -4855,7 +5220,7 @@ function renderPembukuan(){
         const dKey=cd.courier+'|'+tr.tripId;
         const isOpen=_pembExpandedTrips.has(dKey);
         const nMissingCust=tr.itemsDetail.filter(d=>!d.hasCustPhoto).length;
-        const nMissingScale=tr.itemsDetail.filter(d=>!d.hasScalePhoto).length;
+        const nMissingScale=tr.itemsDetail.filter(d=>!d.scalePhotoCount).length;
         h+=`<button onclick="togglePembTripDetail('${dKey.replace(/'/g,"\\'")}')" style="width:100%;text-align:left;margin-top:2px;background:rgba(74,159,212,.08);border:1px solid rgba(74,159,212,.25);color:#4A9FD4;border-radius:8px;padding:8px 10px;font-size:10px;font-weight:700;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
           <span>📦 Rincian Barang & Foto (${tr.itemsDetail.length})${(nMissingCust||nMissingScale)?` <span style="color:#D4A017">· ${nMissingScale} tanpa foto timbangan</span>`:''}</span>
           <span>${isOpen?'▲ Tutup':'▼ Buka'}</span>
@@ -4887,9 +5252,25 @@ function renderPembukuan(){
             const rev=oo?Math.round(orderRevenue(oo)):null;
             const mismatch=(rev!=null && Math.abs(rev-(p.amount||0))>=1000);
             const pickupBadge=oo&&orderPickupRelevant(oo)?(oo.pickupStatus==='sudah'?' <span style="color:#4CAF7D">📦✓</span>':' <span style="color:#D4A017">📦⏳</span>'):'';
-            const proofCount=paymentProofsOf(p).length;
-            const proofBtn=proofCount?`<button onclick="bukaFotoPayment('${p.orderId}',0)" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷${proofCount>1?' '+proofCount:''}</button> <button onclick="unduhBuktiPayment('${p.orderId}',0)" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">⬇</button>`:'<span style="font-size:9px;color:#D4504A">no proof</span>';
+            // KOREKSI BUG: sebelumnya tombol ini SELALU membuka foto index 0
+            // saja (hardcoded) — kalau ada 2+ foto, foto ke-2 dst TIDAK PERNAH
+            // bisa dibuka dari sini. Sekarang jadi toggle yg meluas menampilkan
+            // SEMUA foto satu-per-satu (lihat/unduh/hapus), bukan cuma yg pertama.
+            const proofs=paymentProofsOf(p);
+            const proofCount=proofs.length;
+            const isExpanded=_pembExpandedPayments.has(p.orderId);
+            const proofBtn=proofCount
+              ? `<button onclick="togglePembPaymentPhotos('${p.orderId}')" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷 ${proofCount}${isExpanded?' ▲':' ▼'}</button>`
+              : '<span style="font-size:9px;color:#D4504A">no proof</span>';
             h+=`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:3px 0"><span>• ${p.name||p.code||'-'}${mismatch?' <span style="color:#E8924A">⚠️</span>':''}${pickupBadge} <span style="opacity:.6">(${p.method||''}${p.date?(' · '+p.date):''})</span></span><span style="display:flex;align-items:center;gap:6px"><span style="color:#4CAF7D;font-weight:700">${fmt(p.amount||0)}</span>${proofBtn}</span></div>`;
+            if(isExpanded && proofCount){
+              const photoButtons=proofs.map((_,pi)=>`<span style="display:inline-flex;align-items:center;gap:3px;margin:2px 5px 2px 0">
+                <button onclick="bukaFotoPayment('${p.orderId}',${pi})" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:5px;padding:2px 7px;font-size:9px;font-weight:700;cursor:pointer">📷 Foto ${pi+1}</button>
+                <button onclick="unduhBuktiPayment('${p.orderId}',${pi})" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:5px;padding:2px 6px;font-size:9px;cursor:pointer">⬇</button>
+                <button onclick="deletePaymentProof('${p.orderId}',${pi})" style="background:rgba(212,80,74,.15);border:1px solid rgba(212,80,74,.35);color:#D4504A;border-radius:5px;padding:2px 6px;font-size:9px;cursor:pointer">🗑</button>
+              </span>`).join('');
+              h+=`<div style="padding:4px 0 8px 10px;display:flex;flex-wrap:wrap">${photoButtons}</div>`;
+            }
           });
         });
         h+=`<div style="font-size:8px;color:var(--muted);margin-top:5px">📦✓ = barang sudah diambil · 📦⏳ = belum diambil</div>`;
