@@ -291,7 +291,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v28 · dashboard sinkron & fix tombol putih</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v30 · nama kategori konsisten di semua tempat · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1949,7 +1949,7 @@ function openOrderModal(id){
     <div id="itemcard-${i}" style="background:var(--dark4);border:1px solid var(--border2);border-radius:10px;padding:12px;margin-bottom:8px;opacity:${it.status==='rejected'?'.55':'1'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div>
-          <span style="font-size:13px;font-weight:700">${it.cat}</span>
+          <span style="font-size:13px;font-weight:700">${catDisplayName(it)}</span>
           ${(it.adminPriced||it.cat==='Lainnya')?`<span style="font-size:9px;font-weight:700;color:#D4A017;background:rgba(212,160,23,.12);padding:1px 6px;border-radius:5px;margin-left:5px">⚖️ HARGA ADMIN</span>`:''}
           <span style="font-size:11px;color:var(--muted);margin-left:6px">${it.qty} ${it.type||'kg'}</span>
           ${it.desc?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${it.desc}</div>`:''}
@@ -2247,12 +2247,12 @@ function sendWA(id,overrideSt){
     rincian='\n\n✅ *BARANG DISETUJUI:*';
     approved.forEach(it=>{
       const q=it.actQty??it.qty, r=it.actRate??it.rate??0, sub=(parseFloat(q)||0)*(parseFloat(r)||0);
-      rincian+=`\n• ${it.cat}${it.desc?' ('+it.desc+')':''}: ${q} ${it.type||'kg'}${r?(' × '+fmtRp(r)+' = '+fmtRp(sub)):''}`;
+      rincian+=`\n• ${catDisplayName(it)}${it.desc?' ('+it.desc+')':''}: ${q} ${it.type||'kg'}${r?(' × '+fmtRp(r)+' = '+fmtRp(sub)):''}`;
     });
   }
   if(rejected.length){
     rincian+='\n\n❌ *BARANG TIDAK DISETUJUI:*';
-    rejected.forEach(it=>{ rincian+=`\n• ${it.cat}${it.desc?' ('+it.desc+')':''}${it.adminNote?' — '+it.adminNote:''}`; });
+    rejected.forEach(it=>{ rincian+=`\n• ${catDisplayName(it)}${it.desc?' ('+it.desc+')':''}${it.adminNote?' — '+it.adminNote:''}`; });
   }
 
   // Maklumat cek + tutorial cek status (selalu disertakan)
@@ -2293,7 +2293,7 @@ function openInvoiceModal(id){
     const needsPrice=it.adminPriced && !rateVal;
     return `
     <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:8px;${needsPrice?'border:1px solid rgba(212,160,23,.6)':''}" data-ividx="${realIdx}">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${it.cat}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span>${it.adminByAdmin?' <span style="font-size:9px;font-weight:700;color:#D4A017;background:rgba(212,160,23,.12);padding:1px 6px;border-radius:5px">⚖️ TAMBAHAN ADMIN</span>':''}</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${catDisplayName(it)}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span>${it.adminByAdmin?' <span style="font-size:9px;font-weight:700;color:#D4A017;background:rgba(212,160,23,.12);padding:1px 6px;border-radius:5px">⚖️ TAMBAHAN ADMIN</span>':''}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -2353,7 +2353,7 @@ function calcInv(){
     const q=parseFloat(qEl.value)||0;
     const r=parseFloat(rEl.value)||0;
     total+=q*r;
-    rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">${it.cat} (${q} ${it.type||'kg'})</span><span style="font-weight:700">${fmtRp(q*r)}</span></div>`);
+    rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">${catDisplayName(it)} (${q} ${it.type||'kg'})</span><span style="font-weight:700">${fmtRp(q*r)}</span></div>`);
   });
   const cukai=parseFloat(document.getElementById('iv-cukai')?.value)||0;
   if(cukai){total+=cukai;rows.push(`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border2)"><span style="color:var(--muted)">Cukai / Pajak</span><span style="font-weight:700">${fmtRp(cukai)}</span></div>`);}
@@ -2377,7 +2377,7 @@ async function saveInvoice(){
     if(!it.adminPriced) return;
     const rEl=document.getElementById('ivr-'+i);
     const r=parseFloat(rEl&&rEl.value)||0;
-    if(r<=0) unfilled.push(it.cat||'Barang tambahan');
+    if(r<=0) unfilled.push(catDisplayName(it)||'Barang tambahan');
   });
   if(unfilled.length){
     toast('⚠️ Isi dulu harga: '+unfilled.join(', ')+' — kalau tidak, total invoice akan salah','err');
@@ -2391,7 +2391,7 @@ async function saveInvoice(){
     if(!qEl||!rEl) return it;
     const q=parseFloat(qEl.value)||it.qty;
     const r=parseFloat(rEl.value)||0;
-    invItems.push({cat:it.cat,desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
+    invItems.push({cat:catDisplayName(it),desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
     // update actual di item juga supaya konsisten dgn laporan
     return {...it, actQty:q, actRate:r, type:it.type||'kg'};
   });
@@ -2900,7 +2900,7 @@ function recalcTotalFinal(o){
   if(o.invoiceItems && o.invoiceItems.length){
     o.invoiceItems=(o.items||[]).filter(itemIsBillable).map(function(it){
       const q=(it.actQty!=null?it.actQty:it.qty)||0, r=(it.actRate!=null?it.actRate:it.rate)||0;
-      return {cat:it.cat, desc:it.desc||'', type:it.type||'kg', qty:q, rate:r, total:q*r};
+      return {cat:catDisplayName(it), desc:it.desc||'', type:it.type||'kg', qty:q, rate:r, total:q*r};
     });
   }
   return o.totalFinal;
@@ -3576,7 +3576,7 @@ function _fotoItem(orderId, i){
   const o=(cachedOrders||[]).find(x=>x.id===orderId);
   const it=o&&o.items&&o.items[i];
   if(!it||!it.photo) return null;
-  return {url:it.photo, nama:(o.code||o.id)+'-'+(it.cat||'barang')+'-'+(i+1)};
+  return {url:it.photo, nama:(o.code||o.id)+'-'+(catDisplayName(it)||'barang').replace(/[^a-zA-Z0-9]/g,'')+'-'+(i+1)};
 }
 function bukaFotoItem(orderId, i){
   const f=_fotoItem(orderId,i);
@@ -3804,6 +3804,25 @@ const AN_MIN_SEGMEN = 5;   // minimal item per segmen untuk ditampilkan persenta
 // TIDAK dihitung, walau berada di order yang sudah disetujui.
 // Order yang dibatalkan seluruhnya (cancelled / cancelWholeOrder) dikeluarkan sebagai penjaga.
 // Pakai kg/qty AKTUAL admin (actQty) bila ada.
+// ── KOREKSI: kategori yang dibuat via "+ Tambah Kategori" (addCat) awalnya
+// punya key teknis "cat_"+timestamp dan label placeholder "Kategori Baru".
+// Kalau order lama sempat menyimpan KEY itu (bukan label) di it.cat, tampilan
+// jadi kode aneh spt "cat_1782359782064" walau kategorinya sudah diberi nama
+// jelas belakangan. Fungsi ini menerjemahkan ke nama TERKINI dari Setting,
+// dan utk barang tambahan admin yang masih generik, pakai catatan admin.
+function catDisplayName(it){
+  if(!it) return 'Barang';
+  const raw=it.cat||'';
+  if(it.adminByAdmin && (raw==='Tambahan Admin' || !raw)){
+    if(it.adminNote && it.adminNote!=='Ditambahkan admin saat handling') return it.adminNote;
+    if(it.desc) return it.desc;
+    return raw || 'Tambahan Admin';
+  }
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const found=cats.find(c=>c.key===raw||c.label===raw);
+  if(found && found.label) return found.label;
+  return raw||'Barang';
+}
 function itemBeratKg(it){
   if(!it || it.status!=='approved') return 0;   // KUNCI: hanya barang yg di-approve per item
   const q=parseFloat(it.actQty!=null?it.actQty:it.qty)||0;
@@ -4033,7 +4052,7 @@ function renderAnalisis(){
   orders.forEach(o=>{
     (o.items||[]).forEach(it=>{
       if(!itemIsBillable(it)) return;
-      const k=it.cat||'-';
+      const k=catDisplayName(it); // KOREKSI: nama terkini dari Setting, bukan raw it.cat yg bisa berupa kode cat_xxx
       byCat[k]=byCat[k]||{qty:0,rev:0,n:0,type:it.type||'kg'};
       const q=(it.actQty!=null?it.actQty:it.qty)||0, r=(it.actRate!=null?it.actRate:it.rate)||0;
       byCat[k].qty+=parseFloat(q)||0; byCat[k].rev+=(parseFloat(q)||0)*(parseFloat(r)||0); byCat[k].n++;
@@ -4251,7 +4270,7 @@ function runAudit(period){
       if(!it.adminByAdmin || it.status!=='approved') return;
       const val=((it.actQty!=null?it.actQty:it.qty)||0)*((it.actRate!=null?it.actRate:it.rate)||0);
       if(val>=300000 && (!it.adminNote || it.adminNote==='Ditambahkan admin saat handling'))
-        flags.push({id:'E-'+o.id+'-'+it.cat, sev:'low', cat:'Barang tambahan admin', msg:`Order ${o.code||o.id}: barang tambahan admin "${it.cat}" senilai ${fmt(val)} tanpa catatan spesifik.`});
+        flags.push({id:'E-'+o.id+'-'+it.cat, sev:'low', cat:'Barang tambahan admin', msg:`Order ${o.code||o.id}: barang tambahan admin "${catDisplayName(it)}" senilai ${fmt(val)} tanpa catatan spesifik.`});
     });
   });
 
@@ -4279,7 +4298,7 @@ function runAudit(period){
       const declared=it.qty||0;
       const actual=it.actQty!=null?it.actQty:it.qty;
       if(declared>0 && Math.abs(actual-declared)/declared>=0.15 && !it.scalePhoto)
-        flags.push({id:'I-'+o.id+'-'+it.cat, sev:'low', cat:'Selisih berat tanpa bukti foto', msg:`Order ${o.code||o.id}: "${it.cat}" berat aktual (${actual}${it.type||'kg'}) beda cukup jauh dari deklarasi customer (${declared}${it.type||'kg'}) tanpa foto timbangan sebagai bukti.`});
+        flags.push({id:'I-'+o.id+'-'+it.cat, sev:'low', cat:'Selisih berat tanpa bukti foto', msg:`Order ${o.code||o.id}: "${catDisplayName(it)}" berat aktual (${actual}${it.type||'kg'}) beda cukup jauh dari deklarasi customer (${declared}${it.type||'kg'}) tanpa foto timbangan sebagai bukti.`});
     });
   });
 
@@ -4420,7 +4439,7 @@ function renderPembukuan(){
       const actual=it.actQty!=null?it.actQty:it.qty;
       tr.itemsDetail.push({
         orderId:o.id, idx, orderCode:o.code||o.id, orderName:o.name||'-',
-        cat:it.cat, type:it.type||'kg', declared, actual,
+        cat:catDisplayName(it), type:it.type||'kg', declared, actual,
         rate:(it.actRate!=null?it.actRate:it.rate)||0,
         subtotal:actual*((it.actRate!=null?it.actRate:it.rate)||0),
         hasCustPhoto:!!it.photo, hasScalePhoto:!!it.scalePhoto,
@@ -5470,7 +5489,7 @@ function viewScalePhoto(orderId, idx, photoIdx){
   const it=(o.items||[])[idx]; if(!it) return;
   const photos=scalePhotosOf(it);
   const photo=photos[photoIdx||0]; if(!photo) return;
-  bukaFoto(photo, 'Timbangan-'+(it.cat||'barang').replace(/[^a-zA-Z0-9]/g,'')+(photos.length>1?('-'+((photoIdx||0)+1)):''), false);
+  bukaFoto(photo, 'Timbangan-'+(catDisplayName(it)||'barang').replace(/[^a-zA-Z0-9]/g,'')+(photos.length>1?('-'+((photoIdx||0)+1)):''), false);
 }
 function compressImg(file){
   return new Promise(function(resolve,reject){
@@ -5956,10 +5975,11 @@ async function renderRekap(){
     byRoute[o.route]=(byRoute[o.route]||0)+orderRevenue(o);
     (o.items||[]).forEach(it=>{
       if(!itemIsBillable(it)) return;
-      byCat[it.cat]=byCat[it.cat]||{count:0,kg:0,rev:0};
-      byCat[it.cat].count++;
-      byCat[it.cat].kg+=(it.actQty||it.qty||0);
-      byCat[it.cat].rev+=(it.actQty||it.qty||0)*(it.actRate||it.rate||0);
+      const catName=catDisplayName(it); // KOREKSI: nama terkini dari Setting, bukan raw it.cat yg bisa berupa kode
+      byCat[catName]=byCat[catName]||{count:0,kg:0,rev:0};
+      byCat[catName].count++;
+      byCat[catName].kg+=(it.actQty||it.qty||0);
+      byCat[catName].rev+=(it.actQty||it.qty||0)*(it.actRate||it.rate||0);
       // Kelengkapan foto & berat — sinyal cepat utk pengawasan, tanpa memuat gambar
       nItemsTotal++;
       if(!it.photo) nMissingCustPhoto++;
@@ -6086,7 +6106,7 @@ function exportPembukuanLengkap(){
     } else tCancelled++;
     if(pay){ tCashIn+=(pay.amount||0); if(Math.abs((pay.amount||0)-tagihan)>=1000) tMismatch++; }
     const items=(o.items||[]);
-    const rincian=items.map(it=>`${it.cat}:${(it.actQty!=null?it.actQty:it.qty)||0}${it.type||'kg'}${it.status==='rejected'?'(batal)':''}`).join('; ');
+    const rincian=items.map(it=>`${catDisplayName(it)}:${(it.actQty!=null?it.actQty:it.qty)||0}${it.type||'kg'}${it.status==='rejected'?'(batal)':''}`).join('; ');
     L.push([o.code||o.id,o.name||'',o.phone||'',o.rcvName||'',o.rcvPhone||'',o.route||'',o.tripId||'',kurir,o.status||'',o.payStatus||'',
       pay?pay.method:'',pay?pay.date:'',kg.toFixed(1),rp(o.totalEst),rp(o.cukaiAmount||0),rp(tagihan),rp(rev),
       pay?rp(pay.amount):'',pay?rp((pay.amount||0)-tagihan):'',pay?(pay.proof?'YA':'tidak'):'tidak',
@@ -6107,7 +6127,7 @@ function exportPembukuanLengkap(){
       const actual=it.actQty!=null?it.actQty:it.qty;
       const rate=(it.actRate!=null?it.actRate:it.rate)||0;
       const diffPct=declared>0?Math.round(Math.abs(actual-declared)/declared*100):0;
-      L.push([o.code||o.id, o.name||'', o.tripId||'', kurir, it.cat||'', declared, actual, it.type||'kg', diffPct,
+      L.push([o.code||o.id, o.name||'', o.tripId||'', kurir, catDisplayName(it)||'', declared, actual, it.type||'kg', diffPct,
         rp(rate), rp(actual*rate), it.photo?'YA':'tidak', it.scalePhoto?'YA':'tidak',
         it.status==='rejected'?'Ditolak':it.status==='cancel_requested'?'Minta Batal':it.status==='approved'?'Disetujui':'Pending']);
     });
@@ -6511,7 +6531,7 @@ function exportCSV(){
     o.rcvName||'',o.address||o.domisili||'',o.ekspedisi||'',
     o.totalEst||0,o.totalFinal||'',o.payStatus||'',
     o.createdAt?.toDate?new Date(o.createdAt.toDate()).toLocaleDateString('id-ID'):'',
-    (o.items||[]).map(it=>`${it.cat}:${it.qty}${it.type||'kg'}`).join('; '),
+    (o.items||[]).map(it=>`${catDisplayName(it)}:${it.qty}${it.type||'kg'}`).join('; '),
   ]);
   const csv=[headers,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   saveCSVFile(csv,'MMBaggage_'+new Date().toISOString().slice(0,10)+'.csv');
