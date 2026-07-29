@@ -282,7 +282,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v24 · laporan per kurir gabungan & pribadi</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v26 · sumber tunggal, multi-foto, defisit cukai</div>
     <div id="trips-list"></div>
   </div>
 
@@ -438,6 +438,9 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
         <option value="all">Semua Waktu</option>
         <option value="month">Bulan Ini</option>
         <option value="30">30 Hari Terakhir</option>
+        <option value="90">3 Bulan Terakhir</option>
+        <option value="180">6 Bulan Terakhir</option>
+        <option value="365">1 Tahun Terakhir</option>
       </select></div>
       <div class="field"><label>Cek Pembukuan Berdasarkan</label>
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;width:100%">
@@ -446,10 +449,12 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
         </div>
         <div style="font-size:9px;color:var(--muted);margin-top:5px;line-height:1.4">🧑‍✈️ Per Kurir: gabungkan Cairo→Jakarta→Cairo jadi satu laporan kurir. ✈️ Per Trip: tampilkan tiap arah/rute secara terpisah.</div>
       </div>
+      <div class="field" style="margin-bottom:8px"><label>Trip Tertentu</label><select id="pemb-filter-trip" onchange="renderPembukuan()"><option value="">Semua Trip</option></select></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div class="field" style="margin:0"><label>Kurir Tertentu</label><select id="pemb-filter-kurir" onchange="renderPembukuan()"><option value="">Semua Kurir</option></select></div>
         <div class="field" style="margin:0"><label>Rute Tertentu</label><select id="pemb-filter-rute" onchange="renderPembukuan()"><option value="">Semua Rute</option></select></div>
       </div>
+      <div style="font-size:9px;color:var(--muted);margin:5px 0 12px;line-height:1.4">Pilih Trip/Kurir/Rute untuk laporan rinci. Kosongkan semuanya + pilih Periode saja untuk laporan ringkas bergrafik.</div>
       <div style="font-size:9px;color:var(--muted);margin:5px 0 12px;line-height:1.4">Pilih salah satu untuk menampilkan HANYA data itu — tanpa data kurir/rute lain atau ringkasan bulanan yang mengganggu.</div>
       <div id="pembukuan-result"></div>
     </div>
@@ -1915,7 +1920,7 @@ function simpanKontak(nama, phone, code, tipe){
 function openOrderModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
-  _payProofStaged=null;
+  _payProofsStaged=[];
   const ST=[
     {k:'pending',l:'📝 Pesanan Masuk'},
     {k:'approved',l:'✅ Order Disetujui Admin'},
@@ -1941,20 +1946,7 @@ function openOrderModal(id){
         <div class="field" style="margin:0"><label>Berat/Qty Aktual</label><input type="number" id="iq-${i}" value="${it.actQty??it.qty}" step="0.01" inputmode="decimal"></div>
         <div class="field" style="margin:0"><label>Harga/<span id="unitlbl-${i}">${it.type||'kg'}</span>${it.adminPriced?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ir-${i}" value="${itemRateInputValue(it)}" placeholder="${it.adminPriced?'Tentukan harga...':''}" style="${it.adminPriced&&!itemRateInputValue(it)?'border:2px solid #D4A017':''}" inputmode="numeric"></div>
       </div>
-      <div style="margin-bottom:8px">
-        ${it.scalePhoto ? `
-        <div style="display:flex;gap:8px;align-items:center;background:rgba(74,159,212,.08);border:1px solid rgba(74,159,212,.25);border-radius:9px;padding:8px">
-          <img src="${it.scalePhoto}" onclick="viewScalePhoto('${id}',${i})" style="width:52px;height:52px;object-fit:cover;border-radius:7px;cursor:pointer;flex-shrink:0">
-          <div style="flex:1;min-width:0">
-            <div style="font-size:10px;font-weight:700;color:#4A9FD4">⚖️📷 Foto Timbangan</div>
-            <div style="font-size:9px;color:var(--muted)">Ketuk foto untuk lihat penuh</div>
-          </div>
-          <button type="button" onclick="pickScalePhoto('${id}',${i})" style="background:rgba(212,160,23,.12);border:1px solid rgba(212,160,23,.3);color:#D4A017;border-radius:6px;padding:5px 9px;font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0">🔄</button>
-          <button type="button" onclick="removeScalePhotoStaged('${id}',${i})" style="background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:6px;padding:5px 9px;font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0">🗑</button>
-        </div>` : `
-        <button type="button" class="btn btn-block" onclick="pickScalePhoto('${id}',${i})" style="background:transparent;border:1px dashed rgba(74,159,212,.4);color:#4A9FD4;padding:8px;font-size:11px">📸 Ambil Foto Timbangan (bukti berat aktual)</button>`}
-        <input type="file" accept="image/*" id="scale-photo-input-${i}" style="display:none" onchange="handleScalePhotoPick(this,'${id}',${i})">
-      </div>
+      <div style="margin-bottom:8px">${scaleGalleryHTML(id, i, scalePhotosOf(it))}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -2286,10 +2278,11 @@ function openInvoiceModal(id){
           <button type="button" onclick="setInvUnit(${realIdx},'pcs')" id="ivunit-pcs-${realIdx}" style="padding:5px 12px;font-size:11px;font-weight:700;border:none;cursor:pointer;background:${unit==='pcs'?'var(--gold)':'var(--dark3)'};color:${unit==='pcs'?'var(--dark)':'var(--cream3)'}">PCS</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <div class="field" style="margin:0"><label>Aktual <span id="ivunitlbl-${realIdx}">${unit}</span></label><input type="number" id="ivq-${realIdx}" value="${it.actQty??it.qty}" step="0.01" oninput="calcInv()" inputmode="decimal"></div>
         <div class="field" style="margin:0"><label>Harga/<span id="ivunitlbl2-${realIdx}">${unit}</span>${needsPrice?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ivr-${realIdx}" value="${rateVal}" placeholder="${it.adminPriced?'wajib isi':''}" style="${needsPrice?'border:2px solid #D4A017':''}" oninput="calcInv()" inputmode="numeric"></div>
       </div>
+      ${scaleGalleryHTML(o.id, realIdx, scalePhotosOf(it))}
     </div>`;
   }).join('');
 
@@ -2507,7 +2500,7 @@ function setupExpensesListener(){
 // ══════════════════════════════════════════════
 // 💳 PEMBAYARAN & BUKTI TF (koleksi terpisah 'payments' → order tetap ringan, aman 1MB)
 // ══════════════════════════════════════════════
-let cachedPayments=[], _payProofStaged=null;
+let cachedPayments=[], _payProofsStaged=[];
 function setupPaymentsListener(){
   try{
     db.collection('payments').onSnapshot(snap=>{
@@ -2518,34 +2511,57 @@ function setupPaymentsListener(){
   }catch(e){ console.warn(e); }
 }
 function orderPayment(orderId){ return (cachedPayments||[]).find(p=>p.orderId===orderId || p.id===orderId) || null; }
-function payProofUploadLabel(){
-  return '<label style="display:block;background:var(--dark2);border:1px dashed var(--gold3);border-radius:9px;padding:16px;text-align:center;font-size:12px;color:var(--gold);cursor:pointer">📷 Ketuk untuk pilih / ambil bukti TF<input type="file" accept="image/*" onchange="payProofPick(this)" style="display:none"></label>';
+// ── Multi-foto bukti TF ── Backward-compat: data lama cuma punya `proof`
+// (1 foto) — tetap dibaca sbg array 1 elemen, tidak ada data yg hilang.
+function paymentProofsOf(p){
+  if(!p) return [];
+  if(Array.isArray(p.proofs) && p.proofs.length) return p.proofs;
+  if(p.proof) return [p.proof];
+  return [];
 }
+function payProofUploadLabel(){
+  return '<label style="display:block;background:var(--dark2);border:1px dashed var(--gold3);border-radius:9px;padding:16px;text-align:center;font-size:12px;color:var(--gold);cursor:pointer">📷 Ketuk untuk tambah foto bukti TF (bisa lebih dari 1)<input type="file" accept="image/*" onchange="payProofPick(this)" style="display:none"></label>';
+}
+function paymentProofGalleryHTML(proofs){
+  const thumbs=proofs.map((url,i)=>`<div style="position:relative"><img src="${url}" onclick="bukaFotoPayment('${_payGalleryOrderId||''}',${i})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:pointer"><button onclick="payProofRemoveAt(${i})" style="position:absolute;top:3px;right:3px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:6px;width:22px;height:22px;font-size:12px;cursor:pointer">×</button></div>`).join('');
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px">${thumbs}</div>${payProofUploadLabel()}<div style="font-size:9px;color:var(--muted);margin-top:4px">${proofs.length} foto bukti tersimpan — ketuk foto utk lihat penuh, tambah lagi kalau ada TF dari resi/transfer lain.</div>`;
+}
+let _payGalleryOrderId=null; // dipakai paymentProofGalleryHTML utk tahu order mana yg sedang dibuka
 function payProofPick(input){
   const file=input.files&&input.files[0]; if(!file) return;
   if(file.size>10*1024*1024){ toast('Foto terlalu besar (maks 10MB)','err'); return; }
   toast('Memproses bukti...','info');
   compressImg(file).then(function(dataUrl){
-    _payProofStaged=dataUrl;
+    _payProofsStaged=[...(_payProofsStaged||[]), dataUrl];
     const wrap=document.getElementById('pay-proof-wrap');
-    if(wrap) wrap.innerHTML='<div style="position:relative"><img src="'+dataUrl+'" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px"><button onclick="payProofClear()" style="position:absolute;top:6px;right:6px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:7px;width:30px;height:30px;cursor:pointer">×</button></div>';
-    toast('Bukti TF siap ✅','ok');
+    if(wrap) wrap.innerHTML=paymentProofGalleryHTML(_payProofsStaged);
+    toast('📷 Foto bukti ditambahkan ('+_payProofsStaged.length+') ✅','ok');
   }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
+  input.value='';
+}
+function payProofRemoveAt(idx){
+  _payProofsStaged=(_payProofsStaged||[]).filter((_,i)=>i!==idx);
+  const wrap=document.getElementById('pay-proof-wrap');
+  if(wrap) wrap.innerHTML=_payProofsStaged.length?paymentProofGalleryHTML(_payProofsStaged):payProofUploadLabel();
 }
 function payProofClear(){
-  _payProofStaged=null;
+  _payProofsStaged=[];
   const wrap=document.getElementById('pay-proof-wrap');
   if(wrap) wrap.innerHTML=payProofUploadLabel();
 }
-function bukaFotoPayment(orderId){
+function bukaFotoPayment(orderId, idx){
   const p=orderPayment(orderId);
-  if(!p||!p.proof){ toast('Bukti TF tidak ada','err'); return; }
-  bukaFoto(p.proof, 'BuktiTF-'+(p.code||orderId)+(p.name?(' - '+p.name):''), false);
+  const proofs=paymentProofsOf(p);
+  const photo=proofs[idx||0];
+  if(!photo){ toast('Bukti TF tidak ada','err'); return; }
+  bukaFoto(photo, 'BuktiTF-'+(p.code||orderId)+(p.name?(' - '+p.name):'')+(proofs.length>1?(' ('+((idx||0)+1)+'/'+proofs.length+')'):''), false);
 }
-function unduhBuktiPayment(orderId){
+function unduhBuktiPayment(orderId, idx){
   const p=orderPayment(orderId);
-  if(!p||!p.proof){ toast('Bukti TF tidak ada','err'); return; }
-  simpanFoto(p.proof, 'BuktiTF-'+(p.code||orderId)+(p.name?('-'+p.name):''));
+  const proofs=paymentProofsOf(p);
+  const photo=proofs[idx||0];
+  if(!photo){ toast('Bukti TF tidak ada','err'); return; }
+  simpanFoto(photo, 'BuktiTF-'+(p.code||orderId)+(p.name?('-'+p.name):'')+(proofs.length>1?('-'+((idx||0)+1)):''));
 }
 function payDiffCheck(tagihan){
   const elA=document.getElementById('pay-amount'), elD=document.getElementById('pay-diff'), elT=document.getElementById('pay-tagihan-val');
@@ -2560,6 +2576,7 @@ function payDiffCheck(tagihan){
 // Section pembayaran di modal Kelola (dipanggil dari template openOrderModal)
 function paymentSectionHTML(o){
   const p=orderPayment(o.id);
+  _payGalleryOrderId=o.id; // dipakai onclick thumbnail galeri
   const rev=(typeof orderRevenue==='function')?Math.round(orderRevenue(o)):0;
   const tagihan=(o.totalFinal&&o.totalFinal>0)?Math.round(o.totalFinal):rev;
   const amt=p?(p.amount||0):tagihan;
@@ -2571,9 +2588,10 @@ function paymentSectionHTML(o){
   const diffInit = !amt ? '<span style="color:var(--muted)">Masukkan nominal yang diterima…</span>'
     : Math.abs(_diffAmt)<1 ? '<span style="color:#4CAF7D;font-weight:700">✅ Sesuai tagihan (Rp'+tagihan.toLocaleString('id-ID')+')</span>'
     : '<span style="color:#E8924A;font-weight:800">⚠️ '+(_diffAmt>0?'Lebih':'Kurang')+' Rp'+Math.abs(_diffAmt).toLocaleString('id-ID')+'</span> <span style="color:var(--muted)">vs tagihan Rp'+tagihan.toLocaleString('id-ID')+'</span>';
-  const proofBox = (p&&p.proof)
-    ? `<div style="position:relative"><img src="${p.proof}" onclick="bukaFotoPayment('${o.id}')" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"><div style="position:absolute;bottom:6px;left:6px;background:rgba(76,175,125,.92);color:#fff;font-size:10px;font-weight:800;padding:3px 8px;border-radius:7px">✅ Tersimpan · ketuk untuk lihat</div><button onclick="payProofClear()" style="position:absolute;top:6px;right:6px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:7px;width:30px;height:30px;cursor:pointer">×</button></div>`
-    : payProofUploadLabel();
+  // Kalau ada foto yg baru saja di-stage (belum simpan), tampilkan itu dulu;
+  // kalau tidak, tampilkan foto yg SUDAH tersimpan dari payment existing.
+  const proofsToShow = (_payProofsStaged&&_payProofsStaged.length) ? _payProofsStaged : paymentProofsOf(p);
+  const proofBox = proofsToShow.length ? paymentProofGalleryHTML(proofsToShow) : payProofUploadLabel();
   return `
   <div class="divider"></div>
   <div style="background:linear-gradient(135deg,rgba(76,175,125,.06),rgba(13,13,13,0));border:1px solid rgba(76,175,125,.3);border-radius:12px;padding:13px;margin-bottom:12px">
@@ -2590,7 +2608,8 @@ function paymentSectionHTML(o){
       </div>
       <div class="field" style="flex:1;margin:0"><label>Tanggal Terima</label><input type="date" id="pay-date" value="${date}"></div>
     </div>
-    <div class="field" style="margin-top:8px"><label>Catatan (opsional)</label><input type="text" id="pay-note" value="${note}" placeholder="mis. TF a.n. Iqbal"></div>
+    <div class="field" style="margin-top:8px"><label>Catatan (opsional)</label><input type="text" id="pay-note" value="${note}" placeholder="mis. TF a.n. Iqbal, split 2x transfer"></div>
+    <label style="font-size:10px;color:var(--muted);display:block;margin:8px 0 4px">Foto Bukti TF (bisa lebih dari 1 — mis. kalau customer transfer terpisah/beda resi)</label>
     <div id="pay-proof-wrap" style="margin-bottom:10px">${proofBox}</div>
     <button class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="savePayment('${o.id}')">💾 Simpan Pembayaran & Bukti TF</button>
     ${p?`<button class="btn btn-block" style="margin-top:8px;background:linear-gradient(135deg,#1A6EA8,#4A9FD4);color:#fff" onclick="kirimKwitansiLunas('${o.id}')">✅ Kirim Kwitansi Lunas ke Customer</button>`:''}
@@ -2626,23 +2645,23 @@ async function savePayment(orderId){
   const dateStr=((document.getElementById('pay-date')||{}).value||'').trim();
   const note=((document.getElementById('pay-note')||{}).value||'').trim();
   const existing=orderPayment(orderId);
-  const proof=_payProofStaged || (existing?existing.proof:null);
+  const proofs=(_payProofsStaged&&_payProofsStaged.length) ? _payProofsStaged : paymentProofsOf(existing);
   if(amount<=0){ toast('Isi nominal yang diterima dulu','err'); return; }
-  if(!proof){ toast('Upload bukti TF dulu','err'); return; }
+  if(!proofs.length){ toast('Upload minimal 1 foto bukti TF dulu','err'); return; }
   const trip=(cachedTrips||[]).find(t=>t.id===o.tripId);
   const courier=trip?(trip.courier||'Tanpa Kurir'):'Tanpa Kurir';
   const payload={
     orderId, code:o.code||o.id, name:o.name||'', route:o.route||'', tripId:o.tripId||'',
     courier, amount, method, date:dateStr||new Date().toISOString().slice(0,10),
-    proof, note, recordedBy:currentRole||'admin', ts:Date.now(), createdAt:new Date().toISOString()
+    proofs, proof:proofs[0], note, recordedBy:currentRole||'admin', ts:Date.now(), createdAt:new Date().toISOString()
   };
   // optimistic: satu pembayaran per order (id = orderId)
   cachedPayments=[...(cachedPayments||[]).filter(p=>p.id!==orderId), {...payload, id:orderId}];
   o.payStatus='lunas';
   const completePayload=checkAndMarkComplete(o); // lunas + sudah diambil (dari sebelumnya) → otomatis Selesai
-  _payProofStaged=null;
+  _payProofsStaged=[];
   closeModal('modal-invoice');
-  toast('💰 Pembayaran & bukti TF tersimpan — otomatis masuk pembukuan owner ✅'+(completePayload?' · Order otomatis Selesai ✅':''),'ok');
+  toast('💰 Pembayaran & '+proofs.length+' foto bukti TF tersimpan — otomatis masuk pembukuan owner ✅'+(completePayload?' · Order otomatis Selesai ✅':''),'ok');
   if(typeof filterOrders==='function') filterOrders();
   if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function') renderPembukuan();
   try{
@@ -2899,11 +2918,14 @@ function orderRevenueAudit(o){
   return {auto:auto, used:used, diff:used-auto, overridden:(o.totalFinalOverride===true)};
 }
 function orderKg(o){
+  // KOREKSI BUG: sebelumnya fungsi ini menjumlahkan angka qty MENTAH tanpa
+  // konversi pcs→kg, sehingga barang satuan (pcs) dihitung sbg angka kg yang
+  // salah (mis. "3 pcs" dijumlah sbg "3 kg"). Sekarang pakai itemBeratKg() —
+  // fungsi yg SAMA dgn yang sudah benar dipakai utk kapasitas slot trip —
+  // supaya berat di Rekap/Pembukuan/Analisis SELALU konsisten dgn kapasitas
+  // trip, tidak lagi dua sumber hitungan yang berbeda.
   if(o.status==='cancelled') return 0;
-  return (o.items||[]).filter(itemIsBillable).reduce(function(s,it){
-    var qty=(it.actQty!=null?it.actQty:it.qty)||0;
-    return s+(parseFloat(qty)||0);
-  },0);
+  return (o.items||[]).reduce(function(s,it){ return s+itemBeratKg(it); },0);
 }
 
 // Kunci bulan "YYYY-MM" dari timestamp apa pun — dipakai bersama oleh
@@ -2920,6 +2942,8 @@ function periodFilter(ts, period){
   if(period==='month'){ return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear(); }
   if(period==='30'){ return (now-d)<=30*864e5; }
   if(period==='90'){ return (now-d)<=90*864e5; }
+  if(period==='180'){ return (now-d)<=180*864e5; }
+  if(period==='365'){ return (now-d)<=365*864e5; }
   return true;
 }
 
@@ -3810,13 +3834,18 @@ function refreshCapacityUI(affectedTripId){
 }
 function anNormPhone(p){ return String(p||'').replace(/\D/g,''); }
 function fillPembukuanFilterDropdowns(){
-  const selK=document.getElementById('pemb-filter-kurir'), selR=document.getElementById('pemb-filter-rute');
+  const selK=document.getElementById('pemb-filter-kurir'), selR=document.getElementById('pemb-filter-rute'), selT=document.getElementById('pemb-filter-trip');
   if(!selK||!selR) return;
-  const curK=selK.value, curR=selR.value;
+  const curK=selK.value, curR=selR.value, curT=selT?selT.value:'';
   const kuriers=[...new Set((cachedTrips||[]).map(t=>t.courier).filter(Boolean))].sort();
   selK.innerHTML='<option value="">Semua Kurir</option>'+kuriers.map(k=>`<option value="${k}">${k}</option>`).join('');
   const rutes=[...new Set((cachedTrips||[]).map(t=>t.route).filter(Boolean))].sort();
   selR.innerHTML='<option value="">Semua Rute</option>'+rutes.map(r=>`<option value="${r}">${r}</option>`).join('');
+  if(selT){
+    const trips=(cachedTrips||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    selT.innerHTML='<option value="">Semua Trip</option>'+trips.map(t=>`<option value="${t.id}">${t.id} · ${t.route||''} · ${t.courier||'-'} · ${t.date||''}</option>`).join('');
+    if(curT) selT.value=curT;
+  }
   if(curK) selK.value=curK; if(curR) selR.value=curR;
 }
 function fillAnalisisDropdowns(){
@@ -4312,9 +4341,10 @@ function renderPembukuan(){
   // konsentrasi saat scroll — sesuai permintaan).
   const fKurir=document.getElementById('pemb-filter-kurir')?.value||'';
   const fRute=document.getElementById('pemb-filter-rute')?.value||'';
-  const hasSpecificFilter=!!(fKurir||fRute);
+  const fTrip=document.getElementById('pemb-filter-trip')?.value||'';
+  const hasSpecificFilter=!!(fKurir||fRute||fTrip);
   const allowedTripIds=new Set((cachedTrips||[])
-    .filter(t=>(!fKurir||t.courier===fKurir) && (!fRute||t.route===fRute))
+    .filter(t=>(!fKurir||t.courier===fKurir) && (!fRute||t.route===fRute) && (!fTrip||t.id===fTrip))
     .map(t=>t.id));
 
   // Group by courier → trip (dengan penggabungan PP jika mode gabung)
@@ -4411,12 +4441,18 @@ function renderPembukuan(){
   // Compute totals
   let grandRev=0, grandCost=0, grandComm=0, grandProfit=0, grandCukaiIn=0, grandCukaiOut=0;
   let grandRevPaid=0, grandRevPending=0, grandCommPaid=0, grandOrdersPaid=0, grandOrdersPending=0;
+  let grandCukaiInPaid=0; // ── SUMBER TUNGGAL cukai "sudah masuk": dari tr.cukaiInPaid
+  // (berbasis payStatus==='lunas', SAMA seperti bagasi) — BUKAN dari paymentSplit
+  // atas pembayaran aktual. Acuannya HARUS data tersimpan di order (Kelola/
+  // Invoice), sesuai koreksi: "acuan laporan itu dari kelola/invoice tersimpan
+  // dalam order, agar tidak rancu".
   Object.values(byCourier).forEach(cd=>{
     Object.values(cd.trips).forEach(tr=>{
       const profit=tr.rev - tr.cost - tr.comm;
       cd.totalRev+=tr.rev; cd.totalCost+=tr.cost; cd.totalComm+=tr.comm; cd.totalProfit+=profit; cd.totalKg+=tr.kg; cd.orderCount+=tr.orders;
       cd.totalCukaiIn+=tr.cukaiIn; cd.totalCukaiOut+=tr.cukaiOut;
       cd.totalRevPaid+=tr.revPaid; cd.totalRevPending+=tr.revPending; cd.totalOrdersPaid+=tr.ordersPaid; cd.totalOrdersPending+=tr.ordersPending;
+      grandCukaiInPaid+=tr.cukaiInPaid;
     });
     grandRev+=cd.totalRev; grandCost+=cd.totalCost; grandComm+=cd.totalComm; grandProfit+=cd.totalProfit;
     grandCukaiIn+=cd.totalCukaiIn; grandCukaiOut+=cd.totalCukaiOut;
@@ -4490,9 +4526,10 @@ function renderPembukuan(){
   // 🔍 AUDIT OTOMATIS — paling atas, supaya jadi yang pertama dicek owner
   let h='';
   if(hasSpecificFilter){
+    const parts=[fTrip?('Trip '+fTrip):'',fKurir?('Kurir '+fKurir):'',fRute?('Rute '+fRute):''].filter(Boolean);
     h+=`<div style="background:rgba(212,168,76,.1);border:1.5px solid rgba(212,168,76,.4);border-radius:11px;padding:11px 13px;margin-bottom:14px;text-align:center">
-      <div style="font-size:11px;font-weight:800;color:var(--gold)">🔎 Menampilkan HANYA: ${fKurir?('Kurir '+fKurir):''}${fKurir&&fRute?' · ':''}${fRute?('Rute '+fRute):''}</div>
-      <div style="font-size:9px;color:var(--muted);margin-top:2px">Data kurir/rute lain & ringkasan bulanan disembunyikan. Reset ke "Semua" untuk melihat semuanya lagi.</div>
+      <div style="font-size:11px;font-weight:800;color:var(--gold)">🔎 Menampilkan HANYA: ${parts.join(' · ')}</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px">Data lain & ringkasan bulanan disembunyikan. Reset ke "Semua" untuk melihat semuanya lagi.</div>
     </div>`;
   }
   h+=auditPanelHTML(runAudit(period));
@@ -4559,33 +4596,49 @@ function renderPembukuan(){
   h+=`<div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:#4A9FD4;letter-spacing:1.5px">🛂 LAPORAN 2 · CUKAI</div></div>`;
 
   const cukaiSelisih=grandCukaiIn-grandCukaiOut;
-  // REALTIME: cukai yg BENAR-BENAR sudah diterima via bukti TF (bukan sekadar
-  // ditagih di invoice). Dihitung dari tr.payments yang SUDAH ikut filter
-  // kurir/rute yang sama — supaya konsisten dgn seluruh laporan di halaman ini.
-  let grandCukaiInRealtime=0, grandBagasiInRealtime=0;
-  Object.values(byCourier).forEach(cd=>{
-    Object.values(cd.trips).forEach(tr=>{
-      tr.payments.forEach(p=>{
-        const oo=(cachedOrders||[]).find(o=>o.id===p.orderId);
-        const sp=paymentSplit(p,oo);
-        grandCukaiInRealtime+=sp.cukai; grandBagasiInRealtime+=sp.baggage;
-      });
-    });
-  });
-  const cukaiRealtimeMatch=Math.abs(grandCukaiIn-grandCukaiInRealtime)<1000;
+  // ── KOREKSI SUMBER DATA ── Sebelumnya "Realtime" cukai dihitung dari
+  // paymentSplit() atas nominal pembayaran AKTUAL (cachedPayments) — ini
+  // sumber KEDUA yang berbeda dari cara Bagasi dihitung (yang sudah benar,
+  // berbasis payStatus). Dua sumber berbeda inilah yang menyebabkan angka
+  // Rekap & Pembukuan bisa tidak sinkron. Sekarang DISAMAKAN: acuan tunggal
+  // adalah payStatus==='lunas' + data cukaiAmount tersimpan di order
+  // (dari Kelola/Invoice) — PERSIS seperti cara Bagasi. paymentSplit() tetap
+  // dipakai di tempat lain (rincian per-pembayaran), tapi TIDAK LAGI dipakai
+  // sbg sumber "sudah masuk/belum masuk" di laporan rekonsiliasi ini.
+  const grandBagasiInRealtime=grandRevPaid; // = orderRevenue utk order lunas (sudah ada, sama persis dgn Bagasi)
+  const cukaiRealtimeMatch=Math.abs(grandCukaiIn-grandCukaiInPaid)<1000;
   h+=`<div style="background:var(--bg2);border:1.5px solid rgba(74,159,212,.3);border-radius:13px;padding:14px;margin-bottom:12px">
     <div style="font-size:10px;color:#4A9FD4;text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:8px">🛂 Cukai — Bea Cukai/Pajak (titipan, bukan profit)</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk — Potensi (ditagih via Invoice/Kelola)</div><div style="font-size:13px;font-weight:800;color:var(--cream)">${fmt(grandCukaiIn)}</div></div>
-      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk — Realtime (sudah diterima)</div><div style="font-size:13px;font-weight:800;color:${cukaiRealtimeMatch?'#4CAF7D':'#D4A017'}">${fmt(grandCukaiInRealtime)}</div></div>
+      <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📥 Masuk — Aktual (order berstatus Lunas)</div><div style="font-size:13px;font-weight:800;color:${cukaiRealtimeMatch?'#4CAF7D':'#D4A017'}">${fmt(grandCukaiInPaid)}</div></div>
     </div>
-    ${!cukaiRealtimeMatch?`<div style="font-size:10px;color:#D4A017;margin-top:6px">⚠️ Selisih ${fmt(grandCukaiIn-grandCukaiInRealtime)} — cukai yang ditagih tapi belum diterima customer</div>`:`<div style="font-size:10px;color:#4CAF7D;margin-top:6px">✅ Realtime = Potensi — semua cukai yang ditagih sudah diterima</div>`}
+    ${!cukaiRealtimeMatch?`<div style="font-size:10px;color:#D4A017;margin-top:6px">⚠️ Selisih ${fmt(grandCukaiIn-grandCukaiInPaid)} — cukai yang ditagih tapi order-nya belum berstatus Lunas</div>`:`<div style="font-size:10px;color:#4CAF7D;margin-top:6px">✅ Aktual = Potensi — semua cukai yang ditagih sudah lunas</div>`}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
       <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">📤 Keluar (ditalangi ke bea cukai)</div><div style="font-size:13px;font-weight:800;color:#E8924A">${fmt(grandCukaiOut)}</div></div>
       <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Selisih (Potensi Masuk − Keluar)</div><div style="font-size:13px;font-weight:800;color:${cukaiSelisih>=0?'#4CAF7D':'#C0392B'}">${fmt(Math.abs(cukaiSelisih))}</div></div>
     </div>
-    <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">📥 Potensi = otomatis dari kolom Cukai/Pajak di Kelola &amp; Invoice. Realtime = dihitung dari bukti TF yang benar-benar tersimpan. 📤 Keluar diinput manual setiap kali admin menalangi cukai.</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px;line-height:1.5">📥 Potensi = otomatis dari kolom Cukai/Pajak di Kelola &amp; Invoice. Aktual = dihitung dari order berstatus Lunas (payStatus). 📤 Keluar diinput manual setiap kali admin menalangi cukai.</div>
   </div>`;
+
+  // ── SELISIH CUKAI DEFISIT WAJIB DITUTUPI PROFIT BERSIH ──
+  // Kalau cukai yang ditalangi (keluar) LEBIH BESAR dari yang seharusnya
+  // ditagih ke customer (potensi masuk), itu artinya bisnis menombok — dan
+  // menombok itu HARUS mengurangi Profit Bersih, bukan dibiarkan "hilang"
+  // di laporan cukai yang terpisah dari laporan bagasi.
+  const cukaiDefisit=Math.max(0,-cukaiSelisih); // hanya kalau keluar > masuk
+  const profitSetelahCukai=grandProfit-cukaiDefisit;
+  const profitConfirmedSetelahCukai=grandProfitConfirmed-cukaiDefisit;
+  if(cukaiDefisit>0){
+    h+=`<div class="sec-card" style="margin-bottom:14px;border:1.5px solid rgba(212,80,74,.4)">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;color:#D4504A;letter-spacing:1px;margin-bottom:8px">⚠️ Selisih Cukai Menombok Profit Bersih</div>
+      <div style="font-size:11px;color:var(--cream3);line-height:1.6;margin-bottom:8px">Cukai yang ditalangi (${fmt(grandCukaiOut)}) lebih besar dari yang seharusnya ditagih ke customer (${fmt(grandCukaiIn)}) — selisih <strong style="color:#D4504A">${fmt(cukaiDefisit)}</strong> ini otomatis mengurangi Profit Bersih Anda, karena itu berarti bisnis menombok dari kantong sendiri.</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:2px"><span>Profit Bersih semula (Potensial)</span><span>${fmt(grandProfit)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:800;color:${profitSetelahCukai>=0?'#4CAF7D':'#C0392B'}"><span>Profit Bersih Setelah Selisih Cukai</span><span>${fmt(profitSetelahCukai)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:8px;margin-bottom:2px"><span>Profit Terkonfirmasi semula</span><span>${fmt(grandProfitConfirmed)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:800;color:${profitConfirmedSetelahCukai>=0?'#4CAF7D':'#C0392B'}"><span>Profit Terkonfirmasi Setelah Selisih Cukai</span><span>${fmt(profitConfirmedSetelahCukai)}</span></div>
+    </div>`;
+  }
 
   // 🛂 INPUT CUKAI CEPAT — supaya admin tidak perlu pindah ke menu Pengeluaran
   // terpisah. Tetap memakai data model expense yang sama (type:'cukai'),
@@ -4608,7 +4661,7 @@ function renderPembukuan(){
   // TOTAL BELUM MASUK — gabungan bagasi+cukai yang sudah ditagih tapi belum
   // benar-benar diterima. Kalau 0, semua uang yang seharusnya masuk SUDAH masuk.
   const belumMasukBagasiP=Math.max(0,grandRev-grandBagasiInRealtime);
-  const belumMasukCukaiP=Math.max(0,grandCukaiIn-grandCukaiInRealtime);
+  const belumMasukCukaiP=Math.max(0,grandCukaiIn-grandCukaiInPaid);
   const totalBelumMasukP=belumMasukBagasiP+belumMasukCukaiP;
   h+=`<div class="sec-card" style="margin-bottom:14px;border:1.5px solid ${totalBelumMasukP<1000?'rgba(76,175,125,.4)':'rgba(212,80,74,.4)'}">
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${totalBelumMasukP<1000?'#4CAF7D':'#D4504A'};letter-spacing:1px;margin-bottom:10px">${totalBelumMasukP<1000?'✅ Semua Uang Sudah Masuk Rekening':'⚠️ TOTAL BELUM MASUK REKENING'}</div>
@@ -4617,6 +4670,8 @@ function renderPembukuan(){
     <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:6px"><span style="font-weight:700;font-size:12px">TOTAL BELUM MASUK</span><span style="font-weight:900;font-size:15px;color:${totalBelumMasukP<1000?'#4CAF7D':'#D4504A'}">${fmt(totalBelumMasukP)}</span></div>
   </div>`;
 
+  h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#4A9FD4,#1A6EA8);color:#fff;font-weight:800;margin-bottom:8px" onclick="exportRingkasanBerkala()">📈 Export Ringkasan Berkala + Grafik</button>`;
+  h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Laporan ringkas (profit, omzet, cukai) dengan grafik tren bulanan — file HTML, ikut Periode yang dipilih di atas, TIDAK terikat filter Trip/Kurir/Rute.</div>`;
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#D4A017,#8B6914);color:#1a1508;font-weight:800;margin-bottom:8px" onclick="exportLaporanProfesional()">📊 Export Laporan Profesional (untuk Investor)${hasSpecificFilter?' — '+(fKurir||fRute):''}</button>`;
   h+=`<div style="font-size:9px;color:var(--muted);margin-bottom:12px;line-height:1.5">Laporan rapi & siap diserahkan: tanpa transaksi batal, ada bagi hasil investor (jika ada, digabung per kurir/trip), analisis per trip, dan total keseluruhan di akhir. ${hasSpecificFilter?'Cakupan ikut filter Kurir/Rute di atas.':'Pilih Kurir/Rute di atas dulu untuk mempersempit cakupan laporan.'}</div>`;
   h+=`<button class="btn btn-block" style="background:linear-gradient(135deg,#8B6914,#D4A017);color:#1a1508;font-weight:800;margin-bottom:8px" onclick="exportLaporanPribadi()">📋 Export Laporan Pribadi (Semua Kurir, Format Sama)</button>`;
@@ -4723,7 +4778,8 @@ function renderPembukuan(){
             const rev=oo?Math.round(orderRevenue(oo)):null;
             const mismatch=(rev!=null && Math.abs(rev-(p.amount||0))>=1000);
             const pickupBadge=oo&&orderPickupRelevant(oo)?(oo.pickupStatus==='sudah'?' <span style="color:#4CAF7D">📦✓</span>':' <span style="color:#D4A017">📦⏳</span>'):'';
-            const proofBtn=p.proof?`<button onclick="bukaFotoPayment('${p.orderId}')" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷</button> <button onclick="unduhBuktiPayment('${p.orderId}')" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">⬇</button>`:'<span style="font-size:9px;color:#D4504A">no proof</span>';
+            const proofCount=paymentProofsOf(p).length;
+            const proofBtn=proofCount?`<button onclick="bukaFotoPayment('${p.orderId}',0)" style="background:rgba(76,175,125,.15);border:1px solid rgba(76,175,125,.35);color:#4CAF7D;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">📷${proofCount>1?' '+proofCount:''}</button> <button onclick="unduhBuktiPayment('${p.orderId}',0)" style="background:rgba(74,159,212,.15);border:1px solid rgba(74,159,212,.35);color:#4A9FD4;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer">⬇</button>`:'<span style="font-size:9px;color:#D4504A">no proof</span>';
             h+=`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--muted);padding:3px 0"><span>• ${p.name||p.code||'-'}${mismatch?' <span style="color:#E8924A">⚠️</span>':''}${pickupBadge} <span style="opacity:.6">(${p.method||''}${p.date?(' · '+p.date):''})</span></span><span style="display:flex;align-items:center;gap:6px"><span style="color:#4CAF7D;font-weight:700">${fmt(p.amount||0)}</span>${proofBtn}</span></div>`;
           });
         });
@@ -4876,6 +4932,139 @@ function saveCSVFile(csvText, filename){
       toast('CSV dibuka di tab baru — simpan manual','info');
     }catch(e2){ toast('Gagal export: '+e2.message,'err'); }
   }
+}
+// ── SAMA seperti saveCSVFile, tapi utk file HTML (dipakai laporan ringkas
+// bergrafik — HTML dipilih krn CSV tidak bisa menampilkan diagram visual). ──
+function saveHTMLFile(htmlText, filename){
+  const blob=new Blob([htmlText],{type:'text/html;charset=utf-8'});
+  const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(isIOS && navigator.canShare){
+    try{
+      const file=new File([blob],filename,{type:'text/html'});
+      if(navigator.canShare({files:[file]})){
+        navigator.share({files:[file],title:filename}).then(()=>{ toast('Pilih "Simpan ke File" ✅','ok'); }).catch(()=>{});
+        return;
+      }
+    }catch(e){}
+  }
+  try{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{try{document.body.removeChild(a);}catch(e){} URL.revokeObjectURL(url);},800);
+    toast('Laporan diunduh ✅','ok');
+  }catch(e){
+    try{ window.open(URL.createObjectURL(blob),'_blank'); toast('Laporan dibuka di tab baru — simpan manual','info'); }
+    catch(e2){ toast('Gagal export: '+e2.message,'err'); }
+  }
+}
+// ══════════════════════════════════════════════════
+// 📈 RINGKASAN BERKALA + GRAFIK — utk saat admin HANYA memilih rentang waktu
+// (Bulan Ini / 3 Bulan / 6 Bulan / 1 Tahun / Semua Waktu) TANPA mempersempit
+// ke trip/kurir/rute tertentu. Lebih ringkas dari laporan investor/pribadi —
+// cukup profit, omzet, cukai, & tren bulanan bergrafik. File HTML (bukan CSV)
+// supaya diagramnya benar-benar tampil visual saat dibuka, bukan cuma angka.
+// ══════════════════════════════════════════════════
+function exportRingkasanBerkala(){
+  const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
+  const periodLabel={all:'Semua Waktu',month:'Bulan Ini','30':'30 Hari Terakhir','90':'3 Bulan Terakhir','180':'6 Bulan Terakhir','365':'1 Tahun Terakhir'}[period]||period;
+  const frp=n=>'Rp '+Math.round(n||0).toLocaleString('id-ID');
+
+  const orders=(cachedOrders||[]).filter(o=>o.status!=='cancelled' && periodFilter(o.ts||o.createdAt||Date.now(), period));
+  const exps=(cachedExpenses||[]).filter(e=>periodFilter(e.ts||Date.now(), period));
+  const expsBagasi=exps.filter(e=>e.type!=='cukai');
+  const expsCukai=exps.filter(e=>e.type==='cukai');
+
+  let tRev=0, tRevPaid=0, tKg=0, tComm=0, tCommPaid=0;
+  orders.forEach(o=>{
+    const rev=orderRevenue(o), kg=orderKg(o);
+    tRev+=rev; tKg+=kg;
+    if(o.payStatus==='lunas') tRevPaid+=rev;
+    if(o.referral&&o.referral.code){ const c=(parseFloat(o.referral.commissionPerKg)||0)*kg; tComm+=c; if(o.payStatus==='lunas') tCommPaid+=c; }
+  });
+  const tCost=expsBagasi.reduce((s,e)=>s+(e.amount||0),0);
+  const tCukaiIn=orders.reduce((s,o)=>s+(o.cukaiAmount||0),0);
+  const tCukaiOut=expsCukai.reduce((s,e)=>s+(e.amount||0),0);
+  const profitPotensial=tRev-tCost-tComm;
+  const profitRealtime=tRevPaid-tCost-tCommPaid;
+  const margin=tRev>0?Math.round(profitPotensial/tRev*100):0;
+
+  // Tren bulanan — HANYA dalam rentang periode yg dipilih (beda dari
+  // monthlyBreakdownHTML() di layar yg selalu semua waktu).
+  const byMonth={};
+  orders.forEach(o=>{
+    const k=_monthKey(o.ts||o.createdAt);
+    byMonth[k]=byMonth[k]||{rev:0,profit:0,kg:0};
+    byMonth[k].rev+=orderRevenue(o); byMonth[k].kg+=orderKg(o);
+  });
+  exps.forEach(e=>{
+    const k=_monthKey(e.ts);
+    byMonth[k]=byMonth[k]||{rev:0,profit:0,kg:0};
+  });
+  // profit per bulan: alokasikan biaya non-cukai ke bulan yg sama dgn biayanya dicatat
+  const costByMonth={};
+  expsBagasi.forEach(e=>{ const k=_monthKey(e.ts); costByMonth[k]=(costByMonth[k]||0)+(e.amount||0); });
+  Object.keys(byMonth).forEach(k=>{ byMonth[k].profit=byMonth[k].rev-(costByMonth[k]||0); });
+  const months=Object.keys(byMonth).sort();
+  const maxRev=Math.max(1,...months.map(k=>byMonth[k].rev));
+
+  const barsHTML=months.map(k=>{
+    const d=byMonth[k];
+    const wRev=Math.max(2,Math.round(d.rev/maxRev*100));
+    const wProfit=Math.max(2,Math.round(Math.max(0,d.profit)/maxRev*100));
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#3a2f1a;font-weight:700;margin-bottom:3px"><span>${k}</span><span>${frp(d.rev)} · ${d.kg.toFixed(1)}kg</span></div>
+      <div style="background:#e8dfc8;border-radius:5px;height:16px;overflow:hidden;margin-bottom:3px"><div style="background:linear-gradient(90deg,#8B6914,#D4A017);height:100%;width:${wRev}%"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#6b6152"><span>Profit: ${frp(d.profit)}</span></div>
+      <div style="background:#e8dfc8;border-radius:5px;height:10px;overflow:hidden"><div style="background:${d.profit>=0?'#2D7A4F':'#B03A2E'};height:100%;width:${wProfit}%"></div></div>
+    </div>`;
+  }).join('') || '<div style="color:#999;font-size:13px">Belum ada data pada periode ini.</div>';
+
+  const html=`<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Ringkasan Berkala — M.M Baggage</title>
+  <style>
+    body{font-family:-apple-system,Segoe UI,Arial,sans-serif;background:#faf6ec;color:#2a2416;max-width:680px;margin:0 auto;padding:24px 18px}
+    .letterhead{text-align:center;border-bottom:3px solid #D4A017;padding-bottom:14px;margin-bottom:20px}
+    .letterhead h1{margin:0;color:#8B6914;font-size:22px}
+    .letterhead p{margin:4px 0 0;color:#6b6152;font-size:12px}
+    .card{background:#fff;border:1px solid #e8dfc8;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+    .card h2{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#8B6914}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .stat-label{font-size:11px;color:#6b6152;margin-bottom:2px}
+    .stat-value{font-size:17px;font-weight:800;color:#2a2416}
+    .green{color:#2D7A4F}.red{color:#B03A2E}
+    .footer{text-align:center;font-size:10px;color:#999;margin-top:20px}
+  </style></head>
+  <body>
+    <div class="letterhead">
+      <h1>M.M BAGGAGE — RINGKASAN KEUANGAN</h1>
+      <p>Periode: <strong>${periodLabel}</strong> · Diterbitkan ${new Date().toLocaleString('id-ID')}</p>
+    </div>
+    <div class="card">
+      <h2>💰 Ringkasan Omzet & Profit</h2>
+      <div class="grid">
+        <div><div class="stat-label">Omzet/Revenue</div><div class="stat-value">${frp(tRev)}</div></div>
+        <div><div class="stat-label">Modal & Biaya (di luar cukai)</div><div class="stat-value">${frp(tCost)}</div></div>
+        <div><div class="stat-label">Profit (Potensial)</div><div class="stat-value ${profitPotensial>=0?'green':'red'}">${frp(profitPotensial)}</div></div>
+        <div><div class="stat-label">Profit (Realtime/Lunas)</div><div class="stat-value ${profitRealtime>=0?'green':'red'}">${frp(profitRealtime)}</div></div>
+      </div>
+      <p style="font-size:12px;color:#6b6152;margin-top:10px;margin-bottom:0">Margin: <strong>${margin}%</strong> · Berat total: <strong>${tKg.toFixed(1)} kg</strong> · Jumlah transaksi: <strong>${orders.length}</strong></p>
+    </div>
+    <div class="card">
+      <h2>🛂 Cukai</h2>
+      <div class="grid">
+        <div><div class="stat-label">Masuk (dari customer)</div><div class="stat-value green">${frp(tCukaiIn)}</div></div>
+        <div><div class="stat-label">Keluar (ditalangi)</div><div class="stat-value">${frp(tCukaiOut)}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📊 Tren Bulanan (Revenue & Profit)</h2>
+      ${barsHTML}
+    </div>
+    <div class="footer">Laporan ini dibuat otomatis oleh sistem M.M Baggage. Order yang dibatalkan tidak disertakan.</div>
+  </body></html>`;
+
+  saveHTMLFile(html, 'MMBaggage_Ringkasan_'+period+'_'+new Date().toISOString().slice(0,10)+'.html');
 }
 function exportPembukuanCSV(){
   let rows=[['Kurir','Trip','Tanggal','Rute','Revenue','Modal+Biaya','Komisi','Profit']];
@@ -5179,11 +5368,39 @@ function notifPhotoUploaded(o){
 // tetap terprediksi (selalu ≤4 kali enkode, bukan sampai 5-6x seperti sebelumnya).
 // imageSmoothingQuality 'high' membuat hasil downscale lebih halus, bukan pecah/kotak.
 // ══════════════════════════════════════════════════
-// ⚖️📷 FOTO TIMBANGAN — bukti berat aktual saat admin/kurir menimbang ulang
+// ⚖️📷 FOTO TIMBANGAN — bukti berat aktual saat admin/kurir menimbang ulang.
 // Dipakai bersama pipeline compressImg yang sama dgn foto kurir & bukti TF.
-// Foto disimpan LANGSUNG di item (it.scalePhoto) dan ikut tersimpan otomatis
-// saat "Simpan Update" ditekan (spread ...it di saveOrder sudah membawanya).
+// Sekarang mendukung BEBERAPA foto per barang (mis. foto timbangan digital +
+// foto struk timbangan gudang), dan tersedia baik di Kelola MAUPUN Invoice.
+// Backward-compat: data lama yg cuma punya `scalePhoto` (1 foto) tetap
+// terbaca sbg array 1 elemen lewat scalePhotosOf().
 // ══════════════════════════════════════════════════
+function scalePhotosOf(it){
+  if(!it) return [];
+  if(Array.isArray(it.scalePhotos) && it.scalePhotos.length) return it.scalePhotos;
+  if(it.scalePhoto) return [it.scalePhoto];
+  return [];
+}
+function scaleGalleryHTML(orderId, idx, photos){
+  const input=`<input type="file" accept="image/*" id="scale-photo-input-${idx}" style="display:none" onchange="handleScalePhotoPick(this,'${orderId}',${idx})">`;
+  if(!photos.length){
+    return `<button type="button" class="btn btn-block" onclick="pickScalePhoto('${orderId}',${idx})" style="background:transparent;border:1px dashed rgba(74,159,212,.4);color:#4A9FD4;padding:8px;font-size:11px">📸 Ambil Foto Timbangan (bukti berat aktual, bisa lebih dari 1)</button>${input}`;
+  }
+  const thumbs=photos.map((url,pi)=>`<div style="position:relative"><img src="${url}" onclick="viewScalePhoto('${orderId}',${idx},${pi})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;cursor:pointer"><button type="button" onclick="removeScalePhotoAt('${orderId}',${idx},${pi})" style="position:absolute;top:2px;right:2px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:5px;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">×</button></div>`).join('');
+  return `<div style="background:rgba(74,159,212,.08);border:1px solid rgba(74,159,212,.25);border-radius:9px;padding:8px">
+    <div style="font-size:10px;font-weight:700;color:#4A9FD4;margin-bottom:6px">⚖️📷 Foto Timbangan (${photos.length})</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:6px">${thumbs}</div>
+    <button type="button" onclick="pickScalePhoto('${orderId}',${idx})" style="width:100%;background:rgba(212,160,23,.12);border:1px dashed rgba(212,160,23,.4);color:#D4A017;border-radius:6px;padding:6px;font-size:10px;font-weight:700;cursor:pointer">+ Tambah Foto</button>
+    ${input}
+  </div>`;
+}
+// Refresh modal yg SEDANG TERBUKA (bisa Kelola atau Invoice) supaya galeri
+// foto langsung terlihat update, dari layar manapun aksi ini dipicu.
+function _refreshItemPhotoModal(orderId){
+  const invModal=document.getElementById('modal-invoice');
+  if(invModal && invModal.classList.contains('open')){ openInvoiceModal(orderId); return; }
+  openOrderModal(orderId);
+}
 function pickScalePhoto(orderId, idx){
   const inp=document.getElementById('scale-photo-input-'+idx);
   if(inp) inp.click();
@@ -5195,24 +5412,30 @@ async function handleScalePhotoPick(input, orderId, idx){
   toast('Memproses foto timbangan...','info');
   try{
     const compressed=await compressImg(file);
-    it.scalePhoto=compressed;
-    openOrderModal(orderId); // re-render supaya thumbnail langsung terlihat
-    toast('📸 Foto timbangan siap — klik "Simpan Update" untuk menyimpan ke server','ok');
+    it.scalePhotos=[...scalePhotosOf(it), compressed];
+    it.scalePhoto=it.scalePhotos[0]; // alias foto pertama, utk kompatibilitas cek lama (!it.scalePhoto)
+    _refreshItemPhotoModal(orderId); // re-render supaya galeri langsung terlihat
+    toast('📸 Foto timbangan ditambahkan ('+it.scalePhotos.length+') — klik "Simpan" untuk menyimpan ke server','ok');
   }catch(e){ toast('Gagal memproses foto: '+e.message,'err'); }
   input.value='';
 }
-function removeScalePhotoStaged(orderId, idx){
+function removeScalePhotoAt(orderId, idx, photoIdx){
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
   const it=(o.items||[])[idx]; if(!it) return;
   if(!confirm('Hapus foto timbangan ini?')) return;
-  delete it.scalePhoto;
-  openOrderModal(orderId);
-  toast('Foto timbangan dihapus — klik "Simpan Update" untuk menyimpan perubahan','err');
+  const photos=scalePhotosOf(it).filter((_,pi)=>pi!==photoIdx);
+  it.scalePhotos=photos;
+  it.scalePhoto=photos[0]||null;
+  if(!photos.length) delete it.scalePhoto;
+  _refreshItemPhotoModal(orderId);
+  toast('Foto timbangan dihapus — klik "Simpan" untuk menyimpan perubahan','err');
 }
-function viewScalePhoto(orderId, idx){
+function viewScalePhoto(orderId, idx, photoIdx){
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
-  const it=(o.items||[])[idx]; if(!it || !it.scalePhoto) return;
-  bukaFoto(it.scalePhoto, 'Timbangan-'+(it.cat||'barang').replace(/[^a-zA-Z0-9]/g,''), false);
+  const it=(o.items||[])[idx]; if(!it) return;
+  const photos=scalePhotosOf(it);
+  const photo=photos[photoIdx||0]; if(!photo) return;
+  bukaFoto(photo, 'Timbangan-'+(it.cat||'barang').replace(/[^a-zA-Z0-9]/g,'')+(photos.length>1?('-'+((photoIdx||0)+1)):''), false);
 }
 function compressImg(file){
   return new Promise(function(resolve,reject){
@@ -5710,13 +5933,14 @@ async function renderRekap(){
       if(declared>0 && Math.abs(actual-declared)/declared>=0.15) nWeightDiff++;
     });
   });
-  // Cukai — POTENSI (semua order, dari Kelola/Invoice) vs REALTIME (yang
-  // BENAR-BENAR sudah diterima via bukti TF, dipecah pakai paymentSplit —
-  // fungsi yg sama dipakai di Pembukuan, jadi kedua halaman selalu konsisten).
+  // Cukai — POTENSI (semua order, dari Kelola/Invoice) vs AKTUAL (order
+  // berstatus Lunas) — SUMBER SAMA PERSIS dengan cara Bagasi dihitung di atas
+  // (paidOrders, sudah ada). Sebelumnya cukai realtime salah dihitung dari
+  // paymentSplit() atas pembayaran aktual — itu SUMBER KEDUA yang berbeda dan
+  // menyebabkan Rekap & Pembukuan bisa tidak sinkron. Sudah diperbaiki: kedua
+  // halaman kini pakai payStatus sebagai satu-satunya acuan "sudah masuk".
   const cukaiIn=orders.reduce((s,o)=>s+(o.cukaiAmount||0),0); // POTENSI
-  const paysInScope=(cachedPayments||[]).filter(p=>tf==='all'||p.tripId===tf);
-  let cukaiInRealtime=0, bagasiInRealtime=0;
-  paysInScope.forEach(p=>{ const oo=orders.find(o=>o.id===p.orderId); const sp=paymentSplit(p,oo); cukaiInRealtime+=sp.cukai; bagasiInRealtime+=sp.baggage; });
+  const cukaiInRealtime=paidOrders.reduce((s,o)=>s+(o.cukaiAmount||0),0); // AKTUAL
   const cukaiExpenses=(cachedExpenses||[]).filter(ex=>ex.type==='cukai' && (tf==='all' || ex.tripId===tf));
   const cukaiOut=cukaiExpenses.reduce((s,ex)=>s+(ex.amount||0),0); // Potensi = Realtime (dicatat saat benar² terjadi)
   const revMatch=Math.abs(totalRev-totalRevRealtime)<1000;
@@ -5731,7 +5955,7 @@ async function renderRekap(){
 
   el.innerHTML=`
     <div class="rek-card" style="margin-bottom:10px;border:1.5px solid ${semuaBeres?'rgba(76,175,125,.4)':'rgba(212,160,23,.4)'}">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${semuaBeres?'#4CAF7D':'#D4A017'};letter-spacing:1px">${semuaBeres?'✅ Realtime = Potensi — Semua Beres':'⚠️ Realtime ≠ Potensi — Ada yang Belum Settle'}</div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${semuaBeres?'#4CAF7D':'#D4A017'};letter-spacing:1px">${semuaBeres?'✅ Aktual = Potensi — Semua Beres':'⚠️ Aktual ≠ Potensi — Ada yang Belum Lunas'}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
       <div class="rek-card"><div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Total Berat</div><div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;background:linear-gradient(135deg,var(--gold3),var(--gold));-webkit-background-clip:text;-webkit-text-fill-color:transparent">${totalKg.toFixed(1)} kg</div></div>
@@ -5764,10 +5988,11 @@ async function renderRekap(){
     <div class="rek-card" style="margin-bottom:8px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#4A9FD4;letter-spacing:1px;margin-bottom:10px">🛂 Cukai — Potensi vs Realtime vs Keluar</div>
       <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk — Potensi (ditagih)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px">${fmtRp(cukaiIn)}</span></div>
-      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk — Realtime (diterima)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${cukaiMatch?'#4CAF7D':'#D4A017'}">${fmtRp(cukaiInRealtime)}</span></div>
-      ${!cukaiMatch?`<div style="font-size:10px;color:#D4A017;margin-top:3px">↳ Belum masuk: ${fmtRp(belumMasukCukai)} — cukai ditagih tapi belum diterima</div>`:'<div style="font-size:10px;color:#4CAF7D;margin-top:3px">✅ Semua cukai yang ditagih sudah diterima</div>'}
+      <div class="rek-row"><span style="color:var(--cream3);font-size:12px">📥 Masuk — Aktual (order berstatus Lunas)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:${cukaiMatch?'#4CAF7D':'#D4A017'}">${fmtRp(cukaiInRealtime)}</span></div>
+      ${!cukaiMatch?`<div style="font-size:10px;color:#D4A017;margin-top:3px">↳ Belum masuk: ${fmtRp(belumMasukCukai)} — cukai ditagih tapi order-nya belum Lunas</div>`:'<div style="font-size:10px;color:#4CAF7D;margin-top:3px">✅ Semua cukai yang ditagih sudah lunas</div>'}
       <div class="rek-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span style="color:var(--cream3);font-size:12px">📤 Keluar (ditalangi)</span><span style="font-weight:700;font-family:'Space Mono',monospace;font-size:12px;color:#E8924A">${fmtRp(cukaiOut)}</span></div>
       <div class="rek-row"><span style="color:var(--muted);font-size:11px">Selisih (Potensi Masuk − Keluar)</span><span style="font-weight:800;font-family:'Space Mono',monospace;font-size:12px;color:${(cukaiIn-cukaiOut)>=0?'#4CAF7D':'#C0392B'}">${fmtRp(Math.abs(cukaiIn-cukaiOut))}</span></div>
+      ${(cukaiOut>cukaiIn)?`<div style="background:rgba(212,80,74,.1);border:1px solid rgba(212,80,74,.35);border-radius:8px;padding:8px;margin-top:8px;font-size:10px;color:#D4504A;line-height:1.5">⚠️ Cukai yang ditalangi lebih besar dari yang ditagih — selisih ${fmtRp(cukaiOut-cukaiIn)} ini menombok Profit Bersih. Rincian dampaknya ke profit ada di menu <strong>Pembukuan</strong>.</div>`:''}
       <div style="border-top:1px dashed var(--border);margin-top:9px;padding-top:9px">
         <div style="font-size:9px;font-weight:700;color:#4A9FD4;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🛂 Input Cukai Ditalangi (Cepat)</div>
         <select id="cukai-quick-trip-r" style="width:100%;margin-bottom:6px;font-size:11px"><option value="">Pilih trip...</option>${(cachedTrips||[]).map(t=>`<option value="${t.id}">${t.id} · ${t.route} · ${t.courier||'-'}</option>`).join('')}</select>
@@ -5985,15 +6210,17 @@ function exportPembukuanLengkap(){
 //   • TOTAL KESELURUHAN (uang masuk vs keluar) di baris paling akhir
 //   • Format rapi dgn garis pemisah tegas — layak dibaca pihak luar
 // ══════════════════════════════════════════════════
-function exportLaporanProfesional(overrideKurir, overrideRute, isPersonal){
+function exportLaporanProfesional(overrideKurir, overrideRute, isPersonal, overrideTrip){
   const period=document.getElementById('pemb-period')?document.getElementById('pemb-period').value:'all';
   const fKurir = overrideKurir!=null ? overrideKurir : (document.getElementById('pemb-filter-kurir')?.value||'');
   const fRute = overrideRute!=null ? overrideRute : (document.getElementById('pemb-filter-rute')?.value||'');
-  const periodLabel={all:'Semua Waktu',month:'Bulan Ini','30':'30 Hari Terakhir'}[period]||period;
-  const scopeLabel = fKurir&&fRute ? `Kurir ${fKurir} · Rute ${fRute}` : fKurir ? `Kurir ${fKurir}` : fRute ? `Rute ${fRute}` : 'Semua Kurir & Rute';
+  const fTrip = overrideTrip!=null ? overrideTrip : (document.getElementById('pemb-filter-trip')?.value||'');
+  const periodLabel={all:'Semua Waktu',month:'Bulan Ini','30':'30 Hari Terakhir','90':'3 Bulan Terakhir','180':'6 Bulan Terakhir','365':'1 Tahun Terakhir'}[period]||period;
+  const scopeParts=[fTrip?('Trip '+fTrip):'',fKurir?('Kurir '+fKurir):'',fRute?('Rute '+fRute):''].filter(Boolean);
+  const scopeLabel = scopeParts.length?scopeParts.join(' · '):'Semua Kurir & Rute';
 
   const allowedTripIds=new Set((cachedTrips||[])
-    .filter(t=>(!fKurir||t.courier===fKurir) && (!fRute||t.route===fRute))
+    .filter(t=>(!fKurir||t.courier===fKurir) && (!fRute||t.route===fRute) && (!fTrip||t.id===fTrip))
     .map(t=>t.id));
 
   const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
@@ -6229,7 +6456,7 @@ function exportLaporanProfesional(overrideKurir, overrideRute, isPersonal){
   L.push(['Order yang dibatalkan tidak disertakan dalam laporan ini.']);
 
   const csv=L.map(r=>r.map(esc).join(',')).join('\n');
-  const scopeSlug=(fKurir||fRute||'Semua').replace(/[^a-zA-Z0-9]/g,'');
+  const scopeSlug=(fTrip||fKurir||fRute||'Semua').replace(/[^a-zA-Z0-9]/g,'');
   const filePrefix=isPersonal?'MMBaggage_Laporan_Pribadi_':'MMBaggage_Laporan_Investor_';
   saveCSVFile(csv,filePrefix+scopeSlug+'_'+new Date().toISOString().slice(0,10)+'.csv');
 }
@@ -6238,7 +6465,7 @@ function exportLaporanProfesional(overrideKurir, overrideRute, isPersonal){
 // layar) dan label letterhead "Arsip Pribadi Owner". Tidak ada logika baru —
 // memakai fungsi yg SAMA supaya kedua laporan tidak pernah berbeda format.
 function exportLaporanPribadi(){
-  exportLaporanProfesional('', '', true);
+  exportLaporanProfesional('', '', true, '');
 }
 
 // ── EXPORT CSV (order ringkas) ────────────────
