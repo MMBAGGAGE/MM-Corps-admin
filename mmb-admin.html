@@ -282,7 +282,7 @@ body{font-family:var(--sans);background:var(--dark);color:var(--cream);min-heigh
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v26 · sumber tunggal, multi-foto, defisit cukai</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v27 · invoice sbg acuan utama revenue</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2072,6 +2072,12 @@ function setItemSt(orderId,i,status){
   });
   items[i]={...items[i],status};
   o.items=items;
+  // KOREKSI: sebelumnya perubahan status barang di sini TIDAK memperbarui
+  // totalFinal — kalau ini terjadi SETELAH invoice terbit, invoice yg
+  // tersimpan jadi basi (tidak mencerminkan barang yg baru disetujui/ditolak).
+  // Sekarang selalu disinkronkan lewat recalcTotalFinal() — sumber tunggal
+  // yang sama dipakai Kelola & Invoice, supaya totalFinal SELALU akurat.
+  recalcTotalFinal(o);
   // Lightweight UI update: just swap the badge + button states, no full modal rebuild (no lag)
   const card=document.getElementById('itemcard-'+i);
   if(card){
@@ -2086,7 +2092,7 @@ function setItemSt(orderId,i,status){
   }
   var _slot=refreshCapacityUI(o.tripId);
   toast((status==='approved'?'Barang disetujui ✅':'Barang ditolak ❌')+(_slot?(' · '+_slot):''), status==='approved'?'ok':'err');
-  db.collection('orders').doc(orderId).update({items}).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  db.collection('orders').doc(orderId).update({items, totalFinal:o.totalFinal, totalFinalOverride:false, invoiceItems:o.invoiceItems||[]}).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
 }
 
 async function saveOrder(id){
@@ -2147,6 +2153,8 @@ async function approveOrder(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   // Approve all items, set status to 'approved' (NOT received yet - barang belum sampai Jakarta)
   const items=(o.items||[]).map(it=>({...it,status:it.status==='rejected'?'rejected':'approved'}));
+  o.items=items;
+  recalcTotalFinal(o); // jaga totalFinal tetap sinkron kalau order ini kebetulan sudah pernah diinvoice
   const history=[...(o.history||[]),{status:'approved',ts:Date.now(),note:'Order disetujui admin, menunggu barang masuk gudang'}];
   // AUTO: ambil link grup WA dari trip yang dipilih, masukkan ke order otomatis
   let waLink = o.waGroupLink || '';
@@ -2154,7 +2162,7 @@ async function approveOrder(id){
     const trip = cachedTrips.find(tt => tt.id === o.tripId);
     if(trip && trip.waGroupLink) waLink = trip.waGroupLink;
   }
-  const upd = {status:'approved',items,history};
+  const upd = {status:'approved',items,history,totalFinal:o.totalFinal,totalFinalOverride:false,invoiceItems:o.invoiceItems||[]};
   if(waLink) upd.waGroupLink = waLink;
   // OPTIMISTIC: update cache + UI instan
   o.status='approved'; o.items=items; if(waLink) o.waGroupLink=waLink;
@@ -2892,11 +2900,21 @@ function orderApprovedRevenue(o){
 function orderRevenue(o){
   // Order yang dibatalkan penuh = 0 (tidak masuk laporan)
   if(o.status==='cancelled') return 0;
-  var autoRev=orderApprovedRevenue(o);
-  // Jika admin override totalFinal, pakai itu TAPI selisih tercatat (lihat orderRevenueAudit)
-  if(o.totalFinal!=null && o.totalFinal!==undefined && o.totalFinalOverride===true) return o.totalFinal;
-  // Default: revenue aktual dari item approved
-  return autoRev;
+  // ── KOREKSI SUMBER DATA ──
+  // Sebelumnya fungsi ini SELALU menghitung ulang dari item (o.items) setiap
+  // kali dipanggil, mengabaikan o.totalFinal yang sudah tersimpan — padahal
+  // totalFinal ITULAH invoice final yang benar-benar diterbitkan ke customer
+  // dan jadi acuan pencatatan manual admin. Kalau item berubah SETELAH invoice
+  // terbit (mis. admin setuju/tolak barang lewat Kelola) tanpa invoice
+  // diterbitkan ulang, hasil hitung ulang bisa BERBEDA dari yang sudah
+  // tercatat — itulah sumber ketidakselarasan yang dilaporkan.
+  // Sekarang: kalau invoice SUDAH PERNAH diterbitkan (invoiceItems ada &
+  // totalFinal>0), PAKAI ITU LANGSUNG sebagai acuan utama — bukan hitung ulang.
+  if(o.totalFinal!=null && o.totalFinal>0 && o.invoiceItems && o.invoiceItems.length){
+    return o.totalFinal - (o.cukaiAmount||0); // totalFinal = bagasi + cukai, kembalikan porsi bagasi saja
+  }
+  // Belum pernah diinvoice (masih tahap awal) → estimasi otomatis dari item.
+  return orderApprovedRevenue(o);
 }
 // ── PISAHKAN KAS MASUK: biaya bagasi (jasa) vs cukai (titipan customer utk
 // dibayarkan ke bea cukai — BUKAN keuntungan bisnis). Dialokasikan proporsional
@@ -5119,6 +5137,8 @@ async function bulkUpdateStatus(tripId, status){
       const items=(o.items||[]).map(it=>({...it,status:it.status==='rejected'?'rejected':'approved'}));
       upd.items=items;
       o.items=items; if(waLink)o.waGroupLink=waLink;
+      recalcTotalFinal(o); // jaga totalFinal tetap sinkron kalau order ini sudah pernah diinvoice
+      upd.totalFinal=o.totalFinal; upd.totalFinalOverride=false; upd.invoiceItems=o.invoiceItems||[];
     }
     o.status=status; o.history=history; // optimistic cache
     try{ await db.collection('orders').doc(o.id).update(upd); ok++; }
