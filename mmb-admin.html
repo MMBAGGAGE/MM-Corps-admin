@@ -291,7 +291,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v31 · fix bug pencarian order · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v32 · fix bug foto menggantikan · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1942,7 +1942,12 @@ function simpanKontak(nama, phone, code, tipe){
 function openOrderModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
-  _payProofsStaged=[];
+  // KOREKSI: sebelumnya baris ini SELALU mengosongkan foto bukti TF yang
+  // sedang di-staging, TERMASUK saat admin membuka Kelola untuk order YANG
+  // SAMA yang baru saja ditambahkan fotonya di Invoice — foto yang belum
+  // sempat disimpan jadi hilang diam-diam (terasa spt "foto baru menggantikan
+  // yang lama"). Sekarang HANYA direset kalau benar-benar pindah ke order lain.
+  if(_payProofsStagedForOrderId!==id){ _payProofsStaged=[]; _payProofsStagedForOrderId=id; }
   const ST=[
     {k:'pending',l:'📝 Pesanan Masuk'},
     {k:'approved',l:'✅ Order Disetujui Admin'},
@@ -2290,6 +2295,11 @@ function sendWA(id,overrideSt){
 function openInvoiceModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
+  // KOREKSI: sebelumnya fungsi ini TIDAK PERNAH mereset staging foto bukti
+  // TF sama sekali — kalau admin sempat membuka Invoice utk order lain lalu
+  // kembali ke Invoice order ini, foto lama dari order LAIN bisa ikut
+  // ter-staging di sini secara keliru. Sekarang direset kalau order berbeda.
+  if(_payProofsStagedForOrderId!==id){ _payProofsStaged=[]; _payProofsStagedForOrderId=id; }
   const visibleItems=(o.items||[]).filter(it=>it.status!=='rejected'&&it.status!=='cancel_requested');
   const nCustomer=visibleItems.filter(it=>!it.adminByAdmin).length;
   const nAdmin=visibleItems.filter(it=>it.adminByAdmin).length;
@@ -2530,7 +2540,7 @@ function setupExpensesListener(){
 // ══════════════════════════════════════════════
 // 💳 PEMBAYARAN & BUKTI TF (koleksi terpisah 'payments' → order tetap ringan, aman 1MB)
 // ══════════════════════════════════════════════
-let cachedPayments=[], _payProofsStaged=[];
+let cachedPayments=[], _payProofsStaged=[], _payProofsStagedForOrderId=null;
 function setupPaymentsListener(){
   try{
     db.collection('payments').onSnapshot(snap=>{
@@ -2689,7 +2699,7 @@ async function savePayment(orderId){
   cachedPayments=[...(cachedPayments||[]).filter(p=>p.id!==orderId), {...payload, id:orderId}];
   o.payStatus='lunas';
   const completePayload=checkAndMarkComplete(o); // lunas + sudah diambil (dari sebelumnya) → otomatis Selesai
-  _payProofsStaged=[];
+  _payProofsStaged=[]; _payProofsStagedForOrderId=null;
   closeModal('modal-invoice');
   toast('💰 Pembayaran & '+proofs.length+' foto bukti TF tersimpan — otomatis masuk pembukuan owner ✅'+(completePayload?' · Order otomatis Selesai ✅':''),'ok');
   if(typeof filterOrders==='function') filterOrders();
@@ -5442,7 +5452,7 @@ function scalePhotosOf(it){
   if(it.scalePhoto) return [it.scalePhoto];
   return [];
 }
-function scaleGalleryHTML(orderId, idx, photos){
+function scaleGalleryInnerHTML(orderId, idx, photos){
   const input=`<input type="file" accept="image/*" id="scale-photo-input-${idx}" style="display:none" onchange="handleScalePhotoPick(this,'${orderId}',${idx})">`;
   if(!photos.length){
     return `<button type="button" class="btn btn-block" onclick="pickScalePhoto('${orderId}',${idx})" style="background:transparent;border:1px dashed rgba(74,159,212,.4);color:#4A9FD4;padding:8px;font-size:11px">📸 Ambil Foto Timbangan (bukti berat aktual, bisa lebih dari 1)</button>${input}`;
@@ -5454,6 +5464,16 @@ function scaleGalleryHTML(orderId, idx, photos){
     <button type="button" onclick="pickScalePhoto('${orderId}',${idx})" style="width:100%;background:rgba(212,160,23,.12);border:1px dashed rgba(212,160,23,.4);color:#D4A017;border-radius:6px;padding:6px;font-size:10px;font-weight:700;cursor:pointer">+ Tambah Foto</button>
     ${input}
   </div>`;
+}
+// KOREKSI: sebelumnya menambah 1 foto memicu render ULANG SELURUH modal
+// (Kelola/Invoice) lewat _refreshItemPhotoModal — berisiko: kalau admin
+// sedang mengetik di field LAIN yang belum disimpan, nilai itu ikut ter-reset
+// tiap kali galeri foto diperbarui. Sekarang dibungkus wrapper ber-ID stabil
+// supaya update galeri bisa DITARGETKAN ke wrapper itu saja, TANPA menyentuh
+// bagian modal lainnya — sama seperti pola aman yang sudah dipakai galeri
+// bukti TF (pay-proof-wrap).
+function scaleGalleryHTML(orderId, idx, photos){
+  return `<div id="scale-gallery-wrap-${idx}">${scaleGalleryInnerHTML(orderId, idx, photos)}</div>`;
 }
 // Refresh modal yg SEDANG TERBUKA (bisa Kelola atau Invoice) supaya galeri
 // foto langsung terlihat update, dari layar manapun aksi ini dipicu.
@@ -5475,7 +5495,12 @@ async function handleScalePhotoPick(input, orderId, idx){
     const compressed=await compressImg(file);
     it.scalePhotos=[...scalePhotosOf(it), compressed];
     it.scalePhoto=it.scalePhotos[0]; // alias foto pertama, utk kompatibilitas cek lama (!it.scalePhoto)
-    _refreshItemPhotoModal(orderId); // re-render supaya galeri langsung terlihat
+    // UPDATE DITARGETKAN: hanya wrapper galeri milik item ini, TIDAK
+    // membangun ulang seluruh modal (menghindari reset field lain yg
+    // sedang diketik admin tapi belum disimpan).
+    const wrap=document.getElementById('scale-gallery-wrap-'+idx);
+    if(wrap) wrap.innerHTML=scaleGalleryInnerHTML(orderId, idx, it.scalePhotos);
+    else _refreshItemPhotoModal(orderId); // fallback kalau wrapper tak ditemukan
     toast('📸 Foto timbangan ditambahkan ('+it.scalePhotos.length+') — klik "Simpan" untuk menyimpan ke server','ok');
   }catch(e){ toast('Gagal memproses foto: '+e.message,'err'); }
   input.value='';
@@ -5488,7 +5513,9 @@ function removeScalePhotoAt(orderId, idx, photoIdx){
   it.scalePhotos=photos;
   it.scalePhoto=photos[0]||null;
   if(!photos.length) delete it.scalePhoto;
-  _refreshItemPhotoModal(orderId);
+  const wrap=document.getElementById('scale-gallery-wrap-'+idx);
+  if(wrap) wrap.innerHTML=scaleGalleryInnerHTML(orderId, idx, photos);
+  else _refreshItemPhotoModal(orderId);
   toast('Foto timbangan dihapus — klik "Simpan" untuk menyimpan perubahan','err');
 }
 function viewScalePhoto(orderId, idx, photoIdx){
