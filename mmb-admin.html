@@ -291,7 +291,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v30 · nama kategori konsisten di semua tempat · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v31 · fix bug pencarian order · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -1761,7 +1761,14 @@ function filterOrders(){
     else if(fPickup==='lunas_belum_diambil') list=list.filter(o=>orderPickupRelevant(o) && orderQuadrant(o)==='lunas_belum_diambil');
     else if(fPickup==='lunas_diambil') list=list.filter(o=>orderPickupRelevant(o) && orderQuadrant(o)==='lunas_diambil');
   }
-  if(qRaw)list=list.filter(o=>(o.name||'').toLowerCase().includes(qRaw)||(o.code||'').toLowerCase().includes(qRaw)||(o.phone||'').replace(/\D/g,'').includes(qRaw.replace(/\D/g,''))||(o.rcvName||'').toLowerCase().includes(qRaw));
+  // KOREKSI BUG: kalau qRaw TIDAK mengandung angka sama sekali (mis. cari
+  // nama "Iqbal"), qRaw.replace(/\D/g,'') menghasilkan STRING KOSONG. Di
+  // JavaScript, ''.includes('') SELALU true — jadi cabang pengecekan no. WA
+  // ini dulu membuat SEMUA order lolos filter, bukan cuma yang cocok. Itu
+  // sebabnya pencarian terasa "tidak berfungsi". Sekarang cabang no. WA
+  // HANYA diperiksa kalau kata kuncinya benar-benar mengandung angka.
+  const qDigits=qRaw.replace(/\D/g,'');
+  if(qRaw)list=list.filter(o=>(o.name||'').toLowerCase().includes(qRaw)||(o.code||'').toLowerCase().includes(qRaw)||(qDigits&&(o.phone||'').replace(/\D/g,'').includes(qDigits))||(o.rcvName||'').toLowerCase().includes(qRaw));
   document.getElementById('orders-list').innerHTML=list.length?list.map(o=>orderCardHTML(o)).join(''):'<div class="empty">Tidak ada order yang cocok dengan filter/pencarian ini</div>';
 }
 
