@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v40 · nama jenis barang sesuai Setting · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v41 · nama jenis bersih & salam pembuka WA · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2567,7 +2567,7 @@ function sendWA(id,overrideSt){
   }
 
   const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 *KODE: ${o.code||o.id}*\n🗺️ Rute: *${o.route}*${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 *Total: ${fmtRp(total)}*\n💳 *Bayar: ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${grupWA}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
-  window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
+  window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(waSalam(msg)),'_blank');
 }
 
 // ── INVOICE ───────────────────────────────────
@@ -2716,7 +2716,13 @@ async function saveInvoice(){
     if(!qEl||!rEl) return it;
     const q=parseFloat(qEl.value)||it.qty;
     const r=parseFloat(rEl.value)||0;
-    invItems.push({cat:catDisplayName(it),desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
+    // Nama jenis di invoice customer TETAP disertai keterangan barangnya
+    // (catatan admin / deskripsi), krn app customer hanya menampilkan field
+    // `cat` pada baris invoice. Tanpa ini customer cuma melihat
+    // "Tambahan Admin" tanpa tahu barangnya apa. Rekap TIDAK terpengaruh
+    // karena Rekap menghitung dari o.items, bukan dari invoiceItems.
+    const _ket=catNoteOf(it);
+    invItems.push({cat:catDisplayName(it)+(_ket?' — '+_ket:''),desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
     // update actual di item juga supaya konsisten dgn laporan
     return {...it, actQty:q, actRate:r, type:it.type||'kg'};
   });
@@ -2775,7 +2781,7 @@ function showInvoiceTargetPicker(){
 function closeInvoiceTargetPicker(){ const m=document.getElementById('inv-target-picker'); if(m){ m.style.display='none'; m.innerHTML=''; } }
 function kirimInvoiceWA(target){
   const pi=_pendingInvoice; if(!pi) return;
-  const txt=encodeURIComponent(pi.msg);
+  const txt=encodeURIComponent(waSalam(pi.msg));
   const open=(tel)=>{ if(tel) window.open('https://wa.me/'+tel+'?text='+txt,'_blank'); };
   if(target==='sender') open(pi.sender);
   else if(target==='receiver') open(pi.rcv);
@@ -3644,7 +3650,7 @@ function broadcastWinnerWA(){
   if(!list.length){ box.innerHTML='<div style="font-size:11px;color:var(--muted)">Tidak ada peserta dengan nomor WA.</div>'; return; }
   box.innerHTML='<div style="font-size:11px;color:var(--muted);margin-bottom:6px">WhatsApp buka 1 chat per ketuk. Kirim ke tiap peserta:</div>'
     + list.map(function(p){
-        var url='https://wa.me/'+String(p.phone).replace(/\D/g,'')+'?text='+encodeURIComponent(_winnerMsg(e,p));
+        var url='https://wa.me/'+String(p.phone).replace(/\D/g,'')+'?text='+encodeURIComponent(waSalam(_winnerMsg(e,p)));
         var win=e.winnerName&&(p.name||'').trim().toLowerCase()===String(e.winnerName).trim().toLowerCase();
         return '<a href="'+url+'" target="_blank" class="btn '+(win?'btn-gold':'btn-wa')+'" style="width:100%;font-size:11px;padding:7px 9px;margin-bottom:4px;display:block;text-decoration:none">'+(win?'🏆 ':'💬 ')+(p.name||'-')+' · +'+(p.phone||'')+'</a>';
       }).join('');
@@ -3801,7 +3807,7 @@ function waPeserta(id){
   const link='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
   const sm={pending:'⏳ Sedang kami verifikasi',verified:'✅ *TERVERIFIKASI* — kamu resmi terdaftar!',rejected:'❌ Mohon maaf, tidak dapat kami verifikasi',revisi:'✏️ Perlu revisi'};
   const msg=`Halo *${p.name}* 👋\n\n${waMustReadNotice()}\n*[EVENT] ${ev?ev.title:'M.M Baggage'}*\n━━━━━━━━━━━━━━\n🎟️ Kode Peserta: *${p.code||id}*\n📋 Status: ${sm[p.status||'pending']}${p.verifNote?('\n\n📝 Catatan: '+p.verifNote):''}\n━━━━━━━━━━━━━━\n\nCek status kamu kapan saja:\n👉 ${link}\nBuka menu *Event & Giveaway* → masukkan kode di atas.\n\n_M.M Baggage — Cairo ↔ Jakarta_`;
-  window.open('https://wa.me/'+String(p.phone).replace(/\D/g,'')+'?text='+encodeURIComponent(msg),'_blank');
+  window.open('https://wa.me/'+String(p.phone).replace(/\D/g,'')+'?text='+encodeURIComponent(waSalam(msg)),'_blank');
 }
 function exportPesertaCSV(){
   const eid=document.getElementById('ev-filter-event')?.value||'';
@@ -4179,22 +4185,24 @@ function catDisplayName(it){
   if(!found && raw) found=cats.find(c=>c.key===raw||c.label===raw);
   if(found && found.label) return found.label;
 
-  // 2) PLACEHOLDER TAMBAHAN ADMIN yang belum diisi — tetap ditandai jelas
-  //    supaya admin tahu barang ini masih perlu dilengkapi.
-  if(raw==='Tambahan Admin' || (!raw && it.adminByAdmin)){
-    return note ? ('Lainnya — '+note) : 'Tambahan Admin';
-  }
+  // 2) BARANG TAMBAHAN ADMIN → SELALU ditulis "Tambahan Admin".
+  //    KOREKSI: sebelumnya nama barang yang diketik admin (field "Nama Barang"
+  //    yang tersimpan di desc, mis. "Hp") dipakai sbg NAMA JENIS BARANG,
+  //    sehingga di Rekap muncul baris "Hp · 5 order · 21,3 kg" — seolah-olah
+  //    "Hp" adalah salah satu jenis barang resmi, padahal itu cuma keterangan
+  //    barang titipan. Nama jenis sekarang MURNI mengikuti ketetapan Setting;
+  //    keterangan barangnya tetap utuh & tetap tampil di modal Kelola/Invoice
+  //    dan di invoice customer, hanya tidak lagi dipakai sbg nama kategori.
+  if(raw==='Tambahan Admin' || it.adminByAdmin || !raw) return 'Tambahan Admin';
 
-  // 3) JENIS "LAINNYA" — tampilkan sesuai catatan admin (kalau ada).
-  if(key==='__LAIN__' || raw==='Lainnya' || !raw){
-    return note ? ('Lainnya — '+note) : 'Lainnya';
-  }
+  // 3) JENIS "LAINNYA" dari customer → cukup "Lainnya".
+  if(key==='__LAIN__' || raw==='Lainnya') return 'Lainnya';
 
-  // 4) TEKS BEBAS WARISAN LAMA yang tidak ada di Setting — jangan pernah
-  //    ditampilkan seolah kategori resmi. Teks aslinya tetap dipertahankan
-  //    sbg keterangan supaya tidak ada informasi yang hilang, dan admin bisa
-  //    memetakannya ke kategori resmi lewat "Perbaikan Massal Kategori".
-  return 'Lainnya — '+raw;
+  // 4) TEKS BEBAS WARISAN LAMA yang tidak ada di Setting (mis. "facial wash",
+  //    "ketinggalan antangin") — TIDAK PERNAH tampil sbg kategori resmi.
+  //    Dikumpulkan sbg "Lainnya"; petakan ke kategori resmi lewat
+  //    Setting → 🔧 Perbaikan Massal Kategori.
+  return 'Lainnya';
 }
 function itemBeratKg(it){
   if(!it || it.status!=='approved') return 0;   // KUNCI: hanya barang yg di-approve per item
@@ -6105,6 +6113,20 @@ function previewFiles(input){
 // WhatsApp TIDAK mendukung garis bawah (underline) — hanya *tebal*, _miring_,
 // ~coret~. Jadi penekanan dibuat lewat tebal + baris mencolok di paling atas
 // pesan, bukan karakter unicode underline yang berisiko pecah di sebagian HP.
+// ══════════════════════════════════════════════════
+// 🕌 SALAM PEMBUKA WAJIB — setiap pesan WhatsApp yang dikirim ke customer
+// SELALU diawali salam. Dipasang TERPUSAT di sini lalu dipakai di SEMUA
+// titik kirim WA, supaya tidak perlu menambal puluhan teks pesan satu per
+// satu (dan supaya pesan baru di masa depan otomatis ikut kebagian salam).
+// Ada pengaman anti-dobel: kalau pesannya sudah diawali salam, tidak
+// ditambah lagi.
+// ══════════════════════════════════════════════════
+const WA_SALAM='Assalamualaikum warohmatullahi wabarokatuh 🙏';
+function waSalam(msg){
+  const m=String(msg==null?'':msg);
+  if(/^\s*assalamu/i.test(m)) return m; // sudah ada salam — jangan dobel
+  return WA_SALAM+'\n\n'+m;
+}
 function waMustReadNotice(){
   return '⚠️ *PENTING — WAJIB BACA SAMPAI HABIS* ⚠️\n━━━━━━━━━━━━━━\n*JANGAN LEWATKAN informasi penting di pesan ini.*\n_(IMPORTANT — Please read entire message. Do not skip.)_\n━━━━━━━━━━━━━━\n';
 }
@@ -6119,7 +6141,7 @@ function notifPhotoUploaded(o){
   setTimeout(function(){
     if(confirm('Kirim notif foto ke '+phones.map(p=>p.l).join(' & ')+'?')){
       phones.forEach(function(p,i){
-        setTimeout(function(){ window.open('https://wa.me/'+p.n+'?text='+encodeURIComponent(msg),'_blank'); }, i*800);
+        setTimeout(function(){ window.open('https://wa.me/'+p.n+'?text='+encodeURIComponent(waSalam(msg)),'_blank'); }, i*800);
       });
     }
   }, 600);
