@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v44 · Barang Jenis Lain & kategori ikut catatan admin · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v45 · dua catatan terpisah (customer & sistem) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2022,9 +2022,34 @@ function simpanKontak(nama, phone, code, tipe){
   }catch(e){ toast('Gagal: '+e.message,'err'); }
 }
 
+// ══════════════════════════════════════════════════
+// 🏷️ SARAN CATATAN SISTEM — mencegah kelompok pecah gara-gara beda ketik
+// ("Elektronik" vs "elektronik" vs "Elektronik "). Daftar saran diambil dari
+// catatan sistem yang SUDAH pernah dipakai di order lain + label kategori
+// resmi di Setting, jadi admin tinggal pilih dan penamaannya seragam.
+// ══════════════════════════════════════════════════
+function sysNoteSuggestions(){
+  const set=new Set();
+  (cachedSettings.cats||[]).forEach(c=>{ if(c.label) set.add(String(c.label).trim()); });
+  (cachedOrders||[]).forEach(o=>(o.items||[]).forEach(it=>{
+    const v=String(it.sysNote||'').trim();
+    if(v) set.add(v);
+  }));
+  return Array.from(set).sort((a,b)=>a.localeCompare(b));
+}
+function renderSysNoteDatalist(){
+  let dl=document.getElementById('syslist-global');
+  if(!dl){
+    dl=document.createElement('datalist');
+    dl.id='syslist-global';
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML=sysNoteSuggestions().map(v=>`<option value="${String(v).replace(/"/g,'&quot;')}"></option>`).join('');
+}
 function openOrderModal(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   editOrderId=id;
+  try{ renderSysNoteDatalist(); }catch(e){}
   // KOREKSI: sebelumnya baris ini SELALU mengosongkan foto bukti TF yang
   // sedang di-staging, TERMASUK saat admin membuka Kelola untuk order YANG
   // SAMA yang baru saja ditambahkan fotonya di Invoice — foto yang belum
@@ -2065,7 +2090,8 @@ function openOrderModal(id){
         </div>
       </div>
       ${it.photo?`<div style="margin-bottom:8px"><div style="font-size:10px;color:#4A9FD4;font-weight:700;margin-bottom:4px">📸 Foto contoh dari customer (ketuk untuk lihat &amp; simpan):</div><img src="${it.photo}" onclick="bukaFotoItem('${id}',${i})" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"><button class="btn btn-dark" style="width:100%;margin-top:6px;padding:7px;font-size:11px" onclick="simpanFotoItem('${id}',${i})">⬇ Simpan Foto</button></div>`:''}
-      <div class="field" style="margin-bottom:8px"><label>Catatan Admin</label><input type="text" id="in-${i}" value="${it.adminNote||''}" placeholder="Alasan ditolak, info tambahan..."></div>
+      <div class="field" style="margin-bottom:6px"><label>💬 Catatan untuk Customer</label><input type="text" id="in-${i}" value="${it.adminNote||''}" placeholder="Alasan ditolak, info tambahan..."><div style="font-size:9px;color:var(--muted);margin-top:3px">Dibaca customer di halaman resi &amp; ikut terkirim lewat WhatsApp.</div></div>
+      <div class="field" style="margin-bottom:8px"><label>🏷️ Catatan Admin / Sistem</label><input type="text" id="is-${i}" list="syslist-global" value="${it.sysNote||''}" placeholder="mis. Elektronik, Obat &amp; Herbal, Makanan Ringan..."><div style="font-size:9px;color:var(--muted);margin-top:3px">Hanya untuk internal — <strong>tidak dilihat customer</strong>. Isian ini yang menentukan barang ini masuk kelompok apa di Rekap.</div></div>
       <div style="display:flex;gap:6px">
         ${it.status==='cancel_requested'
           ? `<button class="btn btn-red" onclick="setItemSt('${id}',${i},'rejected')">✅ Setujui Pembatalan</button><button class="btn btn-green" onclick="setItemSt('${id}',${i},'approved')">↩️ Tolak (barang tetap)</button>`
@@ -2540,11 +2566,12 @@ function setItemSt(orderId,i,status){
   const items=[...(o.items||[])];
   // Preserve any values the admin is currently typing across ALL items (qty, rate, note)
   items.forEach((it,j)=>{
-    const q=document.getElementById('iq-'+j), r=document.getElementById('ir-'+j), n=document.getElementById('in-'+j);
+    const q=document.getElementById('iq-'+j), r=document.getElementById('ir-'+j), n=document.getElementById('in-'+j), sn=document.getElementById('is-'+j);
     const patch={};
     if(q&&q.value!=='') patch.actQty=parseFloat(q.value);
     if(r&&r.value!=='') patch.actRate=parseFloat(r.value);
     if(n) patch.adminNote=n.value||it.adminNote||'';
+    if(sn) patch.sysNote=sn.value||it.sysNote||'';
     items[j]={...it,...patch};
   });
   items[i]={...items[i],status};
@@ -2585,6 +2612,7 @@ async function saveOrder(id){
       actQty:parseFloat(document.getElementById('iq-'+i)?.value)||it.qty,
       actRate:parseFloat(document.getElementById('ir-'+i)?.value)||it.rate||0,
       adminNote:document.getElementById('in-'+i)?.value||it.adminNote||'',
+      sysNote:document.getElementById('is-'+i)?.value||it.sysNote||'',
       desc:(document.getElementById('id-'+i)?.value)!=null?document.getElementById('id-'+i).value:it.desc,
     };
   });
@@ -2709,7 +2737,9 @@ function sendWA(id,overrideSt){
     rincian='\n\n✅ *BARANG DISETUJUI:*';
     approved.forEach(it=>{
       const q=it.actQty??it.qty, r=it.actRate??it.rate??0, sub=(parseFloat(q)||0)*(parseFloat(r)||0);
-      rincian+=`\n• ${catDisplayName(it)}${it.desc?' ('+it.desc+')':''}: ${q} ${it.type||'kg'}${r?(' × '+fmtRp(r)+' = '+fmtRp(sub)):''}`;
+      rincian+=`\n• ${catPublicName(it)}${it.desc?' ('+it.desc+')':''}: ${q} ${it.type||'kg'}${r?(' × '+fmtRp(r)+' = '+fmtRp(sub)):''}`;
+      // Catatan admin UNTUK CUSTOMER ikut terkirim; catatan internal tidak.
+      if(it.adminNote && CAT_NOTE_OTOMATIS.indexOf(String(it.adminNote).trim())<0) rincian+=`\n   📝 ${it.adminNote}`;
     });
   }
   if(rejected.length){
@@ -2893,7 +2923,7 @@ async function saveInvoice(){
     // "Tambahan Admin" tanpa tahu barangnya apa. Rekap TIDAK terpengaruh
     // karena Rekap menghitung dari o.items, bukan dari invoiceItems.
     const _ket=catNoteOf(it);
-    invItems.push({cat:catDisplayName(it)+(_ket?' — '+_ket:''),desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
+    invItems.push({cat:catPublicName(it)+(_ket?' — '+_ket:''),desc:it.desc||'',type:it.type||'kg',qty:q,rate:r,total:q*r});
     // update actual di item juga supaya konsisten dgn laporan
     return {...it, actQty:q, actRate:r, type:it.type||'kg'};
   });
@@ -4322,6 +4352,9 @@ const CAT_NOTE_OTOMATIS=[
 // Ambil catatan ASLI dari admin (kalau ada), kalau tidak ada pakai deskripsi
 // yang ditulis customer. Catatan otomatis sistem dibuang.
 function catNoteOf(it){
+  // Keterangan yang BOLEH dilihat customer: catatan untuk customer, lalu
+  // deskripsi barang yang customer tulis sendiri. Catatan internal (sysNote)
+  // sengaja TIDAK dipakai di sini supaya tidak pernah bocor ke invoice/WA.
   const n=String((it&&it.adminNote)||'').trim();
   if(n && CAT_NOTE_OTOMATIS.indexOf(n)<0) return n;
   return String((it&&it.desc)||'').trim();
@@ -4347,9 +4380,37 @@ const LABEL_LAIN='Barang Jenis Lain';
 // otomatis sistem). Dipakai sbg NAMA KELOMPOK supaya laporan rapih &
 // terstruktur sesuai keterangan yang admin tulis sendiri.
 function catAdminNoteOf(it){
-  const n=String((it&&it.adminNote)||'').trim();
+  // PEMISAHAN DUA CATATAN:
+  //  • it.adminNote  = catatan UNTUK CUSTOMER (tampil di halaman resi & WA).
+  //  • it.sysNote    = catatan admin utk DIRINYA SENDIRI / SISTEM (internal).
+  // Pengelompokan di Rekap HANYA boleh memakai sysNote. Dulu keduanya
+  // dirangkap satu field, akibatnya kalimat yang ditujukan ke customer
+  // (mis. "foto kurang jelas, tolong kirim ulang") ikut jadi NAMA KELOMPOK
+  // di laporan. Sekarang catatan customer tidak pernah lagi menyentuh
+  // pengelompokan, dan sebaliknya catatan internal tidak pernah bocor ke customer.
+  const n=String((it&&it.sysNote)||'').trim();
   if(n && CAT_NOTE_OTOMATIS.indexOf(n)<0) return n;
   return '';
+}
+// ══════════════════════════════════════════════════
+// 👁️ NAMA JENIS BARANG VERSI PUBLIK (untuk customer: WA, invoice, resi)
+// Bedanya dengan catDisplayName(): fungsi ini TIDAK PERNAH memakai catatan
+// internal (sysNote). Catatan internal boleh berisi istilah gudang atau
+// singkatan yang hanya dimengerti admin, jadi tidak layak — dan tidak boleh —
+// muncul di mata customer. Pengelompokan laporan tetap pakai catDisplayName().
+// ══════════════════════════════════════════════════
+function catPublicName(it){
+  if(!it) return 'Barang';
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const raw=String(it.cat||'').trim();
+  const key=String(it.catKey||'').trim();
+  if(key==='__LAIN__' || key==='Lainnya' || raw==='Lainnya' || raw==='__LAIN__') return LABEL_LAIN;
+  let found=null;
+  if(key) found=cats.find(c=>c.key===key);
+  if(!found && raw) found=cats.find(c=>c.key===raw||c.label===raw);
+  if(found && found.label) return found.label;
+  if(raw==='Tambahan Admin' || it.adminByAdmin || !raw) return 'Tambahan Admin';
+  return LABEL_LAIN;
 }
 function catDisplayName(it){
   if(!it) return 'Barang';
