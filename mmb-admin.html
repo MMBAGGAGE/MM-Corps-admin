@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v38 · perbaikan 5 poin kritis · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v39 · perbaikan struktur halaman Settings · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -568,9 +568,10 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
       <button class="btn btn-gold btn-block" onclick="backupSemua()">💾 Backup Sekarang</button>
       <details style="margin-top:10px">
         <summary style="font-size:11px;color:var(--muted);cursor:pointer">🔄 Pulihkan dari backup (bahaya)</summary>
-        <div style="margin-top:10px">
-          <input type="file" id="bak-restore-file" accept="application/json">
-          <button class="btn btn-dark btn-block" style="margin-top:8px" onclick="restoreDariBackup()">🔄 Pulihkan</button>
+        <div style="background:rgba(212,80,74,.07);border:1px solid rgba(212,80,74,.25);border-radius:9px;padding:10px;margin-top:8px">
+          <div style="font-size:11px;color:#D4504A;line-height:1.5;margin-bottom:8px">⚠️ Pemulihan <strong>menimpa</strong> data yang ada sekarang dan <strong>tidak bisa dibatalkan</strong>. Backup dulu sebelum memulihkan.</div>
+          <label style="display:block;background:var(--dark2);border:1px dashed var(--border);border-radius:8px;padding:11px;text-align:center;font-size:11px;color:var(--gold);cursor:pointer;margin-bottom:8px">📂 Pilih file backup (.json)<input type="file" accept=".json,application/json" onchange="pilihFileRestore(this)" style="display:none"></label>
+          <button class="btn btn-red btn-block" onclick="jalankanRestore()">🔄 Pulihkan</button>
         </div>
       </details>
     </div>
@@ -578,16 +579,9 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
     <!-- PERBAIKAN MASSAL KATEGORI -->
     <div class="sec-card" id="bulkfix-cat-section" style="border-color:rgba(74,159,212,.35);display:none">
       <div class="sec-lbl" style="color:#4A9FD4">🔧 Perbaikan Massal Kategori</div>
-      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ditemukan kategori barang yang <strong>tidak sesuai dengan daftar Jenis Barang di Setting</strong> (mis. "Hp", "facial wash", dll — seharusnya sudah masuk kategori resmi). Klik tombol di bawah untuk melihat & memperbaiki semuanya sekaligus dalam satu kali operasi.</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ditemukan kategori barang yang <strong>tidak sesuai dengan daftar Jenis Barang di Setting</strong> (mis. "Hp", "facial wash"). Klik tombol di bawah untuk melihat &amp; memperbaiki semuanya sekaligus.</div>
       <div id="bulkfix-count" style="font-size:11px;color:#4A9FD4;margin-bottom:10px;font-weight:700"></div>
       <button class="btn btn-block" style="background:linear-gradient(135deg,#4A9FD4,#74A9D4);color:#fff" onclick="showBulkCategoryFixerModal()">🔧 Perbaiki Kategori Salah</button>
-    </div>
-        <div style="background:rgba(212,80,74,.07);border:1px solid rgba(212,80,74,.25);border-radius:9px;padding:10px;margin-top:8px">
-          <div style="font-size:11px;color:#D4504A;line-height:1.5;margin-bottom:8px">⚠️ Pemulihan <strong>menimpa</strong> data yang ada sekarang dan <strong>tidak bisa dibatalkan</strong>. Backup dulu sebelum memulihkan.</div>
-          <label style="display:block;background:var(--dark2);border:1px dashed var(--border);border-radius:8px;padding:11px;text-align:center;font-size:11px;color:var(--gold);cursor:pointer;margin-bottom:8px">📂 Pilih file backup (.json)<input type="file" accept=".json,application/json" onchange="pilihFileRestore(this)" style="display:none"></label>
-          <button class="btn btn-red btn-block" onclick="jalankanRestore()">🔄 Pulihkan</button>
-        </div>
-      </details>
     </div>
 
     <!-- KEAMANAN: MIGRASI ORDER -->
