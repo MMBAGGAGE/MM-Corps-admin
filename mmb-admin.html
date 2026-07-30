@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v39 · perbaikan struktur halaman Settings · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v40 · nama jenis barang sesuai Setting · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2341,7 +2341,10 @@ function commitAddInvoiceItem(orderId){
   const cat=(cachedSettings.cats||[]).find(c=>c.key===catKey);
   const rate=cachedSettings.rates?.[catKey]||0;
   const items=[...(o.items||[])];
-  items.push({cat:cat?cat.label:catKey, type:(cat&&cat.type)||'kg', qty, rate, actQty:qty, actRate:rate, desc:'', status:'approved', adminByAdmin:true, adminNote:'Ditambahkan admin saat Invoice (aktualisasi)'});
+  // catKey WAJIB ikut disimpan: tanpa ini, begitu admin mengganti nama
+  // kategori di Setting, barang ini kehilangan induknya dan muncul sbg
+  // "kategori" palsu di Rekap.
+  items.push({cat:cat?cat.label:catKey, catKey, type:(cat&&cat.type)||'kg', qty, rate, actQty:qty, actRate:rate, desc:'', status:'approved', adminByAdmin:true, adminNote:'Ditambahkan admin saat Invoice (aktualisasi)'});
   o.items=items;
   recalcTotalFinal(o);
   document.getElementById('add-invoice-item-picker').innerHTML='';
@@ -4132,18 +4135,66 @@ const AN_MIN_SEGMEN = 5;   // minimal item per segmen untuk ditampilkan persenta
 // jadi kode aneh spt "cat_1782359782064" walau kategorinya sudah diberi nama
 // jelas belakangan. Fungsi ini menerjemahkan ke nama TERKINI dari Setting,
 // dan utk barang tambahan admin yang masih generik, pakai catatan admin.
+// Catatan yang dibuat OTOMATIS oleh sistem — ini bukan keterangan barang dari
+// admin, jadi TIDAK boleh dipakai sebagai nama jenis barang di laporan.
+const CAT_NOTE_OTOMATIS=[
+  'Ditambahkan admin saat handling',
+  'Ditambahkan admin saat Invoice (aktualisasi)',
+  '(Barang tambahan dari customer)'
+];
+// Ambil catatan ASLI dari admin (kalau ada), kalau tidak ada pakai deskripsi
+// yang ditulis customer. Catatan otomatis sistem dibuang.
+function catNoteOf(it){
+  const n=String((it&&it.adminNote)||'').trim();
+  if(n && CAT_NOTE_OTOMATIS.indexOf(n)<0) return n;
+  return String((it&&it.desc)||'').trim();
+}
+// ══════════════════════════════════════════════════
+// 🏷️ NAMA JENIS BARANG UNTUK SEMUA LAPORAN (Rekap, Analisis, Invoice, ekspor)
+// KOREKSI BUG: versi lama berakhir dengan `return raw` — artinya kalau nilai
+// it.cat berupa TEKS BEBAS yang tidak ada di Setting (mis. "Hp",
+// "facial wash", "ketinggalan antangin" dari data lama), teks itu ditampilkan
+// APA ADANYA seolah-olah dia kategori resmi, lalu ikut jadi baris tersendiri
+// di "Per Kategori". Selain itu it.catKey TIDAK PERNAH dipakai, padahal itu
+// penanda paling andal: kalau admin mengganti NAMA kategori di Setting, nilai
+// it.cat yang menyimpan label lama langsung jadi yatim & bocor lagi sbg
+// kategori palsu. Sekarang:
+//   1) Resolusi resmi pakai catKey DULU (tahan ganti nama), baru cat.
+//   2) Jenis "Lainnya" ditampilkan sesuai CATATAN ADMIN.
+//   3) Teks bebas warisan lama TIDAK PERNAH tampil sbg kategori resmi —
+//      selalu ditandai sbg "Lainnya" agar jelas bukan ketetapan Setting.
+// ══════════════════════════════════════════════════
 function catDisplayName(it){
   if(!it) return 'Barang';
-  const raw=it.cat||'';
-  if(it.adminByAdmin && (raw==='Tambahan Admin' || !raw)){
-    if(it.adminNote && it.adminNote!=='Ditambahkan admin saat handling') return it.adminNote;
-    if(it.desc) return it.desc;
-    return raw || 'Tambahan Admin';
-  }
   const cats=(cachedSettings&&cachedSettings.cats)||[];
-  const found=cats.find(c=>c.key===raw||c.label===raw);
+  const raw=String(it.cat||'').trim();
+  const key=String(it.catKey||'').trim();
+  const note=catNoteOf(it);
+
+  // 1) RESOLUSI RESMI — catKey lebih dulu krn tidak ikut berubah saat admin
+  //    mengganti nama kategori di Setting; cat dipakai sbg cadangan (isinya
+  //    bisa berupa key ATAU label, tergantung jalur pembuatan barangnya).
+  let found=null;
+  if(key && key!=='__LAIN__') found=cats.find(c=>c.key===key);
+  if(!found && raw) found=cats.find(c=>c.key===raw||c.label===raw);
   if(found && found.label) return found.label;
-  return raw||'Barang';
+
+  // 2) PLACEHOLDER TAMBAHAN ADMIN yang belum diisi — tetap ditandai jelas
+  //    supaya admin tahu barang ini masih perlu dilengkapi.
+  if(raw==='Tambahan Admin' || (!raw && it.adminByAdmin)){
+    return note ? ('Lainnya — '+note) : 'Tambahan Admin';
+  }
+
+  // 3) JENIS "LAINNYA" — tampilkan sesuai catatan admin (kalau ada).
+  if(key==='__LAIN__' || raw==='Lainnya' || !raw){
+    return note ? ('Lainnya — '+note) : 'Lainnya';
+  }
+
+  // 4) TEKS BEBAS WARISAN LAMA yang tidak ada di Setting — jangan pernah
+  //    ditampilkan seolah kategori resmi. Teks aslinya tetap dipertahankan
+  //    sbg keterangan supaya tidak ada informasi yang hilang, dan admin bisa
+  //    memetakannya ke kategori resmi lewat "Perbaikan Massal Kategori".
+  return 'Lainnya — '+raw;
 }
 function itemBeratKg(it){
   if(!it || it.status!=='approved') return 0;   // KUNCI: hanya barang yg di-approve per item
