@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v43 · bongkar isi kategori (telusur ke order) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v44 · Barang Jenis Lain & kategori ikut catatan admin · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -579,7 +579,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
     <!-- KLASIFIKASI BARANG -->
     <div class="sec-card" id="bulkfix-cat-section" style="border-color:rgba(74,159,212,.35);display:none">
       <div class="sec-lbl" style="color:#4A9FD4">🏷️ Klasifikasi Barang</div>
-      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ada barang yang <strong>belum punya kategori resmi</strong>, jadi di Rekap hanya masuk "Tambahan Admin"/"Lainnya". Buka daftarnya untuk melihat <strong>tiap barang lengkap dengan keterangan, pemilik, berat &amp; harganya</strong>, lalu tentukan kategorinya satu per satu.</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ada barang yang <strong>belum punya kategori resmi</strong>, jadi di Rekap hanya masuk "Tambahan Admin"/"Barang Jenis Lain". Buka daftarnya untuk melihat <strong>tiap barang lengkap dengan keterangan, pemilik, berat &amp; harganya</strong>, lalu tentukan kategorinya satu per satu.</div>
       <div id="bulkfix-count" style="font-size:11px;color:#4A9FD4;margin-bottom:10px;font-weight:700"></div>
       <button class="btn btn-block" style="background:linear-gradient(135deg,#4A9FD4,#74A9D4);color:#fff" onclick="showBulkCategoryFixerModal()">🏷️ Buka Daftar &amp; Klasifikasikan</button>
     </div>
@@ -1069,7 +1069,7 @@ function getDefaultSettings(){
       {key:'Elektronik',label:'Elektronik',sub:'HP, laptop, gadget',type:'pcs',routes:['Cairo → Jakarta','Jakarta → Cairo']},
       {key:'Makanan',label:'Makanan / Herbal',sub:'Kurma, madu, rempah',type:'kg',routes:['Cairo → Jakarta','Jakarta → Cairo']},
       {key:'Rokok',label:'Rokok / Tembakau',sub:'Per slop/karton',type:'pcs',routes:['Jakarta → Cairo']},
-      {key:'Lainnya',label:'Lainnya',sub:'Barang lain',type:'kg',routes:['Cairo → Jakarta','Jakarta → Cairo']},
+      {key:'Lainnya',label:'Barang Jenis Lain',sub:'Pilih ini kalau jenis barang tidak ada di daftar',type:'kg',routes:['Cairo → Jakarta','Jakarta → Cairo']},
     ],
     rates:{Biasa:150000,Skincare:180000,Elektronik:175000,Makanan:145000,Rokok:120000,Lainnya:150000},
     bulkRates:{},
@@ -2445,7 +2445,16 @@ function showAddInvoiceItemPicker(orderId){
     <div class="field" style="margin:0 0 8px"><label>Jenis Barang</label>
       <select id="new-inv-item-cat" onchange="updateNewInvItemRateHint()">
         ${allCats.map(c=>`<option value="${c.key}">${c.label} (${fmtRp(cachedSettings.rates?.[c.key]||0)}/${c.type||'kg'})</option>`).join('')}
+        <option value="__BARU__">➕ Buat kategori baru…</option>
       </select>
+    </div>
+    <div id="new-cat-box" style="display:none;background:rgba(74,159,212,.07);border:1px solid rgba(74,159,212,.28);border-radius:8px;padding:9px;margin-bottom:8px">
+      <div style="font-size:9px;color:#4A9FD4;margin-bottom:6px;line-height:1.5">Kategori baru ini akan <strong>tersimpan permanen di Setting</strong> dan langsung bisa dipilih customer.</div>
+      <div class="field" style="margin:0 0 7px"><label>Nama Kategori Baru</label><input type="text" id="new-cat-nama" placeholder="mis. Sepatu / Sandal"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        <div class="field" style="margin:0"><label>Satuan</label><select id="new-cat-tipe"><option value="kg">⚖️ per kg</option><option value="pcs">📦 per pcs</option></select></div>
+        <div class="field" style="margin:0"><label>Harga / satuan</label><input type="number" id="new-cat-harga" placeholder="150000" inputmode="numeric"></div>
+      </div>
     </div>
     <div class="field" style="margin:0 0 8px"><label>Berat/Qty Aktual</label><input type="number" id="new-inv-item-qty" placeholder="0" step="0.01" inputmode="decimal"></div>
     <div style="font-size:9px;color:var(--muted);margin-bottom:8px" id="new-inv-item-rate-hint"></div>
@@ -2458,16 +2467,47 @@ function showAddInvoiceItemPicker(orderId){
 }
 function updateNewInvItemRateHint(){
   const sel=document.getElementById('new-inv-item-cat'); if(!sel) return;
-  const cat=(cachedSettings.cats||[]).find(c=>c.key===sel.value);
+  const box=document.getElementById('new-cat-box');
   const hint=document.getElementById('new-inv-item-rate-hint');
+  // Mode "buat kategori baru": tampilkan kolom isian kategori baru.
+  if(sel.value==='__BARU__'){
+    if(box) box.style.display='block';
+    if(hint) hint.textContent='Kategori baru akan ditambahkan ke Setting saat kamu tekan Tambahkan.';
+    return;
+  }
+  if(box) box.style.display='none';
+  const cat=(cachedSettings.cats||[]).find(c=>c.key===sel.value);
   if(hint && cat) hint.textContent='Harga ditetapkan admin: '+fmtRp(cachedSettings.rates?.[cat.key]||0)+'/'+(cat.type||'kg')+' — bisa diedit setelah ditambahkan.';
 }
 function commitAddInvoiceItem(orderId){
   if(!guard('addinvitem-'+orderId,600)) return;
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
-  const catKey=document.getElementById('new-inv-item-cat')?.value;
+  let catKey=document.getElementById('new-inv-item-cat')?.value;
   const qty=parseFloat(document.getElementById('new-inv-item-qty')?.value)||0;
   if(!catKey){ toast('Pilih jenis barang dulu','err'); return; }
+  // ── BUAT KATEGORI BARU DI TEMPAT ──
+  // Kalau jenis barang yang dibutuhkan belum terdaftar, admin tidak perlu
+  // keluar ke Setting: kategori dibuat di sini, tersimpan permanen, lalu
+  // langsung dipakai untuk barang ini. Kunci memakai pola cat_<timestamp>
+  // yang sama dgn addCat() supaya tidak pernah bentrok.
+  if(catKey==='__BARU__'){
+    const nama=String(document.getElementById('new-cat-nama')?.value||'').trim();
+    const tipe=document.getElementById('new-cat-tipe')?.value||'kg';
+    const harga=parseFloat(document.getElementById('new-cat-harga')?.value)||0;
+    if(!nama){ toast('Isi nama kategori baru dulu','err'); return; }
+    if(harga<=0){ toast('Isi harga per '+tipe+' untuk kategori baru','err'); return; }
+    const bentrok=(cachedSettings.cats||[]).find(c=>String(c.label||'').toLowerCase()===nama.toLowerCase());
+    if(bentrok){ catKey=bentrok.key; }
+    else{
+      catKey='cat_'+Date.now();
+      if(!cachedSettings.cats) cachedSettings.cats=[];
+      cachedSettings.cats.push({key:catKey,label:nama,sub:'',type:tipe,routes:['Cairo → Jakarta','Jakarta → Cairo']});
+      if(!cachedSettings.rates) cachedSettings.rates={};
+      cachedSettings.rates[catKey]=harga;
+      if(typeof saveSettings==='function') saveSettings();
+      toast('🏷️ Kategori "'+nama+'" ditambahkan ke Setting','ok');
+    }
+  }
   if(qty<=0){ toast('Isi berat/qty aktual dulu','err'); return; }
   const cat=(cachedSettings.cats||[]).find(c=>c.key===catKey);
   const rate=cachedSettings.rates?.[catKey]||0;
@@ -4301,39 +4341,49 @@ function catNoteOf(it){
 //   3) Teks bebas warisan lama TIDAK PERNAH tampil sbg kategori resmi —
 //      selalu ditandai sbg "Lainnya" agar jelas bukan ketetapan Setting.
 // ══════════════════════════════════════════════════
+// Nama resmi untuk barang yang jenisnya tidak terdaftar di Setting.
+const LABEL_LAIN='Barang Jenis Lain';
+// Catatan ASLI dari admin saja (bukan deskripsi customer, bukan catatan
+// otomatis sistem). Dipakai sbg NAMA KELOMPOK supaya laporan rapih &
+// terstruktur sesuai keterangan yang admin tulis sendiri.
+function catAdminNoteOf(it){
+  const n=String((it&&it.adminNote)||'').trim();
+  if(n && CAT_NOTE_OTOMATIS.indexOf(n)<0) return n;
+  return '';
+}
 function catDisplayName(it){
   if(!it) return 'Barang';
   const cats=(cachedSettings&&cachedSettings.cats)||[];
   const raw=String(it.cat||'').trim();
   const key=String(it.catKey||'').trim();
-  const note=catNoteOf(it);
+  const note=catAdminNoteOf(it);
 
-  // 1) RESOLUSI RESMI — catKey lebih dulu krn tidak ikut berubah saat admin
-  //    mengganti nama kategori di Setting; cat dipakai sbg cadangan (isinya
-  //    bisa berupa key ATAU label, tergantung jalur pembuatan barangnya).
+  // ── 0) EMBER KHUSUS "BARANG JENIS LAIN" — DICEK PALING AWAL ──
+  // KOREKSI BUG SERIUS: kunci bawaan 'Lainnya' bisa "dibajak". Kalau admin
+  // mengganti LABEL kategori berkunci 'Lainnya' menjadi mis. "Hp", maka
+  // resolusi resmi (cari c.key===raw) akan menemukan kategori itu dan
+  // SELURUH order customer yang tersimpan sbg cat:'Lainnya' ikut terbaca
+  // sebagai "Hp" — persis yang terjadi pada data Kemal (santan, minyak
+  // telon, proyektor, cookies semuanya masuk "Hp"). Karena itu ember ini
+  // sekarang diperiksa SEBELUM resolusi resmi, sehingga tidak bisa lagi
+  // tersedot ke kategori mana pun apa pun namanya.
+  if(key==='__LAIN__' || key==='Lainnya' || raw==='Lainnya' || raw==='__LAIN__'){
+    return note || LABEL_LAIN;
+  }
+
+  // ── 1) RESOLUSI RESMI — catKey dulu (tahan ganti nama), baru cat. ──
   let found=null;
-  if(key && key!=='__LAIN__') found=cats.find(c=>c.key===key);
+  if(key) found=cats.find(c=>c.key===key);
   if(!found && raw) found=cats.find(c=>c.key===raw||c.label===raw);
   if(found && found.label) return found.label;
 
-  // 2) BARANG TAMBAHAN ADMIN → SELALU ditulis "Tambahan Admin".
-  //    KOREKSI: sebelumnya nama barang yang diketik admin (field "Nama Barang"
-  //    yang tersimpan di desc, mis. "Hp") dipakai sbg NAMA JENIS BARANG,
-  //    sehingga di Rekap muncul baris "Hp · 5 order · 21,3 kg" — seolah-olah
-  //    "Hp" adalah salah satu jenis barang resmi, padahal itu cuma keterangan
-  //    barang titipan. Nama jenis sekarang MURNI mengikuti ketetapan Setting;
-  //    keterangan barangnya tetap utuh & tetap tampil di modal Kelola/Invoice
-  //    dan di invoice customer, hanya tidak lagi dipakai sbg nama kategori.
-  if(raw==='Tambahan Admin' || it.adminByAdmin || !raw) return 'Tambahan Admin';
+  // ── 2) BARANG TAMBAHAN ADMIN — dikelompokkan sesuai CATATAN ADMIN. ──
+  // Kalau admin menulis catatan, itulah nama kelompoknya (rapih & terstruktur).
+  // Kalau tidak ada catatan sama sekali, baru jatuh ke "Tambahan Admin".
+  if(raw==='Tambahan Admin' || it.adminByAdmin || !raw) return note || 'Tambahan Admin';
 
-  // 3) JENIS "LAINNYA" dari customer → cukup "Lainnya".
-  if(key==='__LAIN__' || raw==='Lainnya') return 'Lainnya';
-
-  // 4) TEKS BEBAS WARISAN LAMA yang tidak ada di Setting (mis. "facial wash",
-  //    "ketinggalan antangin") — TIDAK PERNAH tampil sbg kategori resmi.
-  //    Dikumpulkan sbg "Lainnya"; petakan ke kategori resmi lewat
-  //    Setting → 🔧 Perbaikan Massal Kategori.
-  return 'Lainnya';
+  // ── 3) TEKS BEBAS WARISAN LAMA — kumpulkan sbg Barang Jenis Lain. ──
+  return note || LABEL_LAIN;
 }
 function itemBeratKg(it){
   if(!it || it.status!=='approved') return 0;   // KUNCI: hanya barang yg di-approve per item
