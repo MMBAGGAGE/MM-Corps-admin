@@ -208,8 +208,23 @@ select option{background:var(--dark3);color:var(--cream)}
 .sec-card{background:linear-gradient(150deg,var(--dark3),var(--dark2));box-shadow:var(--rim)}
 .modal{background:linear-gradient(180deg,var(--dark3),var(--dark2));box-shadow:0 -20px 50px -12px rgba(0,0,0,.8)}
 .field input:focus,.field select:focus,.field textarea:focus,.login-card input:focus,.search-wrap input:focus{box-shadow:0 0 0 3px rgba(201,168,76,.12)}
-/* === INSTANT TAP LAYER: hilangkan delay klik di iOS === */
-*{touch-action:manipulation}
+/* === INSTANT TAP LAYER: hilangkan delay klik di iOS ===
+   KOREKSI BUG SERIUS (scroll freeze di modal Invoice): sebelumnya
+   `*{touch-action:manipulation}` berlaku ke SEMUA elemen tanpa kecuali —
+   termasuk modal Invoice yang sekarang jauh lebih padat berisi banyak
+   tombol kecil (🗑 hapus barang, ✕ hapus rate cukai, toggle KG/PCS, dst).
+   Pada iOS Safari, ketika BANYAK elemen kecil bertumpuk semuanya diberi
+   touch-action:manipulation di dalam satu container yang seharusnya bisa
+   discroll, browser bisa gagal mengoper gestur "geser jari" ke container
+   induk — hasilnya halaman/modal terasa macet tak bisa discroll ke bawah.
+   Sekarang touch-action:manipulation HANYA dipasang ke elemen yang memang
+   perlu (tombol/link/dsb, sesuai daftar selector yang sama dgn baris di
+   bawah), BUKAN ke seluruh elemen secara serampangan. */
+button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn-teal,.pill,.fpill,.type-btn,.cat-card{touch-action:manipulation}
+/* JARING PENGAMAN TAMBAHAN: pastikan container yang MEMANG harus bisa
+   discroll vertikal SELALU menang atas touch-action elemen anak di
+   dalamnya, apa pun yang terjadi pada aturan di atas. */
+.modal,.page{touch-action:pan-y}
 .tab,.ocard,.btn,.btn-block,.btn-gold,.btn-teal,.pill,.fpill,.type-btn,.cat-card,button,[onclick]{
   -webkit-tap-highlight-color:transparent;
   cursor:pointer;
@@ -291,7 +306,7 @@ select option{background:var(--dark3);color:var(--cream)}
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v37 · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v38 · perbaikan 5 poin kritis · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -553,6 +568,20 @@ select option{background:var(--dark3);color:var(--cream)}
       <button class="btn btn-gold btn-block" onclick="backupSemua()">💾 Backup Sekarang</button>
       <details style="margin-top:10px">
         <summary style="font-size:11px;color:var(--muted);cursor:pointer">🔄 Pulihkan dari backup (bahaya)</summary>
+        <div style="margin-top:10px">
+          <input type="file" id="bak-restore-file" accept="application/json">
+          <button class="btn btn-dark btn-block" style="margin-top:8px" onclick="restoreDariBackup()">🔄 Pulihkan</button>
+        </div>
+      </details>
+    </div>
+
+    <!-- PERBAIKAN MASSAL KATEGORI -->
+    <div class="sec-card" id="bulkfix-cat-section" style="border-color:rgba(74,159,212,.35);display:none">
+      <div class="sec-lbl" style="color:#4A9FD4">🔧 Perbaikan Massal Kategori</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ditemukan kategori barang yang <strong>tidak sesuai dengan daftar Jenis Barang di Setting</strong> (mis. "Hp", "facial wash", dll — seharusnya sudah masuk kategori resmi). Klik tombol di bawah untuk melihat & memperbaiki semuanya sekaligus dalam satu kali operasi.</div>
+      <div id="bulkfix-count" style="font-size:11px;color:#4A9FD4;margin-bottom:10px;font-weight:700"></div>
+      <button class="btn btn-block" style="background:linear-gradient(135deg,#4A9FD4,#74A9D4);color:#fff" onclick="showBulkCategoryFixerModal()">🔧 Perbaiki Kategori Salah</button>
+    </div>
         <div style="background:rgba(212,80,74,.07);border:1px solid rgba(212,80,74,.25);border-radius:9px;padding:10px;margin-top:8px">
           <div style="font-size:11px;color:#D4504A;line-height:1.5;margin-bottom:8px">⚠️ Pemulihan <strong>menimpa</strong> data yang ada sekarang dan <strong>tidak bisa dibatalkan</strong>. Backup dulu sebelum memulihkan.</div>
           <label style="display:block;background:var(--dark2);border:1px dashed var(--border);border-radius:8px;padding:11px;text-align:center;font-size:11px;color:var(--gold);cursor:pointer;margin-bottom:8px">📂 Pilih file backup (.json)<input type="file" accept=".json,application/json" onchange="pilihFileRestore(this)" style="display:none"></label>
@@ -733,8 +762,14 @@ select option{background:var(--dark3);color:var(--cream)}
     <div class="modal-title">Invoice Final</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Berdasarkan timbangan & pengecekan aktual di Cairo. Ini acuan laporan keuangan owner.</p>
     <div id="invoice-form"></div>
-    <button class="btn btn-gold btn-block" onclick="saveInvoice()">💾 Simpan & Kirim ke Customer via WA</button>
-    <button class="btn btn-ghost btn-block" onclick="closeModal('modal-invoice')">Batal</button>
+    <!-- Tombol dibuat STICKY (menempel di dasar layar saat scroll) sbg jaring
+         pengaman tambahan — supaya kalau perangkat tertentu masih terasa berat
+         discroll sampai benar-benar dasar, tombol Simpan tetap selalu terlihat
+         & terjangkau tanpa perlu scroll penuh sampai akhir. -->
+    <div style="position:sticky;bottom:-40px;background:var(--dark2);padding:10px 0 0;margin:8px -19px -40px;padding-left:19px;padding-right:19px;padding-bottom:16px;box-shadow:0 -8px 16px -8px rgba(0,0,0,.4)">
+      <button class="btn btn-gold btn-block" onclick="saveInvoice()">💾 Simpan & Kirim ke Customer via WA</button>
+      <button class="btn btn-ghost btn-block" onclick="closeModal('modal-invoice')">Batal</button>
+    </div>
   </div>
 </div>
 
@@ -1431,6 +1466,20 @@ function renderSettings(){
   const jktEl=document.getElementById('dp-jkt');
   if(cairoEl) cairoEl.value=dp['Cairo → Jakarta']?.address||'';
   if(jktEl) jktEl.value=dp['Jakarta → Cairo']?.address||'';
+  // Check for mismatched categories
+  const wrong=scanMismatchedCategories();
+  const wrongNames=Object.keys(wrong);
+  const bulkSection=document.getElementById('bulkfix-cat-section');
+  if(bulkSection){
+    if(wrongNames.length){
+      const count=wrongNames.reduce((s,k)=>s+wrong[k],0);
+      bulkSection.style.display='block';
+      const countEl=document.getElementById('bulkfix-count');
+      if(countEl) countEl.textContent=`🔴 ${wrongNames.length} nama kategori berbeda (${count} barang) yang perlu diperbaiki`;
+    }else{
+      bulkSection.style.display='none';
+    }
+  }
   filterSettingsSections(); // terapkan ulang pencarian aktif (kalau ada) setelah render
 }
 // ── PENCARIAN UMUM DI SETTINGS ──
@@ -2106,7 +2155,11 @@ function deleteAdminItem(orderId, idx){
   o.items=items.filter(function(_,i){ return i!==idx; });
   recalcTotalFinal(o); // sumber tunggal — Invoice ikut sinkron otomatis
   const _slot=refreshCapacityUI(o.tripId); // barang terhapus bisa mengubah slot kg trip
-  openOrderModal(orderId); // render ulang Kelola supaya index & tampilan konsisten
+  // KOREKSI: sebelumnya SELALU membuka Kelola (openOrderModal) — kalau tombol
+  // hapus ini dipakai dari Invoice, itu keliru membanting admin balik ke layar
+  // yang berbeda. Sekarang refresh modal yg MEMANG sedang terbuka (Kelola ATAU
+  // Invoice), pakai helper context-aware yg sama dgn galeri foto.
+  _refreshItemPhotoModal(orderId);
   toast('🗑️ Barang "'+(removed.cat||'')+'" dihapus'+(_slot?(' · '+_slot):''),'err');
   db.collection('orders').doc(orderId).update({
     items:o.items, totalFinal:o.totalFinal, totalFinalOverride:false,
@@ -2121,6 +2174,144 @@ function deleteAdminItem(orderId, idx){
 // admin tinggal pilih jenis barang + masukkan berat/qty AKTUAL, harga
 // otomatis terisi (tetap bisa diedit). Ini yg membedakan Kelola (estimasi)
 // vs Invoice (aktualisasi): di sini barang baru langsung berdasar harga real.
+// ── UBAH KATEGORI BARANG (koreksi data lama) ──
+// Beberapa order lama tersimpan dengan "kategori" berupa teks bebas (mis.
+// deskripsi customer saat pilih "Lainnya", atau catatan admin saat pakai
+// addAdminItem generik) — tampil membingungkan di laporan krn bukan nama
+// kategori resmi. Fitur ini membiarkan admin memetakan ULANG kategori barang
+// ke kategori resmi yang ada di Setting, TANPA mengubah qty/harga/barang
+// lainnya. Dipakai dari Kelola MAUPUN Invoice (context-aware refresh).
+function showChangeItemCategoryPicker(orderId, idx){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const it=(o.items||[])[idx]; if(!it) return;
+  const allCats=(cachedSettings.cats||[]).filter(c=>!c.routes || c.routes.indexOf(o.route)>=0);
+  const wrap=document.getElementById('change-cat-picker-'+idx); if(!wrap) return;
+  wrap.innerHTML=`<div style="background:rgba(212,168,76,.06);border:1px solid rgba(212,168,76,.3);border-radius:9px;padding:9px;margin-top:6px">
+    <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Kategori sekarang: <strong style="color:var(--cream3)">${catDisplayName(it)}</strong> — pilih kategori resmi yang benar:</div>
+    <select id="change-cat-select-${idx}" style="margin-bottom:8px">
+      ${allCats.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff;font-size:11px;padding:8px" onclick="commitChangeItemCategory('${orderId}',${idx})">✅ Terapkan</button>
+      <button type="button" class="btn btn-block btn-ghost" style="font-size:11px;padding:8px" onclick="document.getElementById('change-cat-picker-${idx}').innerHTML=''">Batal</button>
+    </div>
+  </div>`;
+}
+function commitChangeItemCategory(orderId, idx){
+  if(!guard('changecat-'+orderId+'-'+idx,600)) return;
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const it=(o.items||[])[idx]; if(!it) return;
+  const catKey=document.getElementById('change-cat-select-'+idx)?.value;
+  if(!catKey){ toast('Pilih kategori dulu','err'); return; }
+  const cat=(cachedSettings.cats||[]).find(c=>c.key===catKey);
+  if(!cat){ toast('Kategori tidak ditemukan','err'); return; }
+  const oldName=catDisplayName(it);
+  // HANYA ganti label kategori — qty/harga/foto/status TIDAK disentuh sama sekali.
+  it.cat=cat.label; it.catKey=catKey;
+  recalcTotalFinal(o); // invoiceItems ikut sinkron (nama kategori baru terbawa ke sana juga)
+  const wrap=document.getElementById('change-cat-picker-'+idx); if(wrap) wrap.innerHTML='';
+  _refreshItemPhotoModal(orderId);
+  toast('🏷️ Kategori diubah: "'+oldName+'" → "'+cat.label+'"','ok');
+  db.collection('orders').doc(orderId).update({
+    items:o.items, totalFinal:o.totalFinal, totalFinalOverride:false, invoiceItems:o.invoiceItems||[]
+  }).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+}
+// ══════════════════════════════════════════════════
+// 🔧 PERBAIKAN MASSAL KATEGORI — mengatasi data lama dgn nama kategori
+// yang tidak sesuai Settings (mis. customer "Hp", "facial wash", dll yg
+// seharusnya sudah masuk kategori resmi). Scan semua order, list kategori
+// yg tidak ada di Settings, dan biarkan admin map-kan ulang semuanya sekaligus.
+// ══════════════════════════════════════════════════
+function scanMismatchedCategories(){
+  if(!cachedSettings.cats) return {};
+  const settingsKeys=new Set((cachedSettings.cats||[]).map(c=>[c.key, c.label]).flat());
+  const wrongCats={};
+  (cachedOrders||[]).forEach(o=>{
+    (o.items||[]).forEach(it=>{
+      const raw=it.cat||'';
+      if(!raw || settingsKeys.has(raw)) return; // skip yg kosong atau match
+      wrongCats[raw]=(wrongCats[raw]||0)+1;
+    });
+  });
+  return wrongCats;
+}
+function showBulkCategoryFixerModal(){
+  const wrong=scanMismatchedCategories();
+  const wrongNames=Object.keys(wrong).sort((a,b)=>wrong[b]-wrong[a]);
+  if(!wrongNames.length){ toast('Tidak ada kategori yang salah — semua sudah benar! ✅','ok'); return; }
+  const allCats=(cachedSettings.cats||[]).map(c=>({key:c.key,label:c.label}));
+  let html=`<div style="padding:16px">
+    <div style="font-size:13px;font-weight:800;color:var(--gold);margin-bottom:10px">🔧 Perbaikan Massal Kategori Salah</div>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">Ditemukan <strong>${wrongNames.length}</strong> nama kategori yang tidak sesuai Settings (total <strong>${wrongNames.reduce((s,k)=>s+wrong[k],0)}</strong> barang). Pilih kategori yg benar untuk tiap item di bawah, lalu terapkan semuanya.</p>
+    <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:12px">`;
+  wrongNames.forEach((wrongName,idx)=>{
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
+      <div style="font-size:11px;color:var(--cream3)"><strong>"${wrongName}"</strong> <span style="color:var(--muted)">(${wrong[wrongName]} barang)</span></div>
+      <select id="bulkfix-${idx}" style="font-size:11px">
+        <option value="">— Pilih kategori yang benar —</option>
+        ${allCats.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
+      </select>
+    </div>`;
+  });
+  html+=`</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="applyBulkCategoryFix()">✅ Terapkan Perbaikan</button>
+      <button class="btn btn-block btn-ghost" onclick="document.getElementById('bulkfix-modal').innerHTML='';document.getElementById('bulkfix-modal').style.display='none'">Batal</button>
+    </div>
+  </div>`;
+  let m=document.getElementById('bulkfix-modal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='bulkfix-modal';
+    m.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
+    document.body.appendChild(m);
+  }
+  m.innerHTML=`<div style="background:var(--dark2);border:1px solid var(--gold);border-radius:12px;padding:0;max-width:420px;width:100%;max-height:80vh;overflow-y:auto">${html}</div>`;
+  m.style.display='flex';
+  window._bulkFixWrongCats=wrongNames;
+}
+function applyBulkCategoryFix(){
+  if(!guard('bulkfixcat',800)) return;
+  const wrongNames=window._bulkFixWrongCats||[];
+  if(!wrongNames.length){ toast('Tidak ada data untuk diperbaiki','err'); return; }
+  const mapping={};
+  let hasEmpty=false;
+  wrongNames.forEach((wrongName,idx)=>{
+    const sel=document.getElementById('bulkfix-'+idx);
+    const newKey=sel?.value||'';
+    if(!newKey){ hasEmpty=true; return; }
+    mapping[wrongName]=newKey;
+  });
+  if(hasEmpty){ toast('Isi SEMUA pilihan kategori dulu','err'); return; }
+  let changed=0;
+  (cachedOrders||[]).forEach(o=>{
+    let orderChanged=false;
+    (o.items||[]).forEach(it=>{
+      const wrongName=it.cat||'';
+      if(mapping[wrongName]){
+        const newCat=(cachedSettings.cats||[]).find(c=>c.key===mapping[wrongName]);
+        if(newCat){
+          it.cat=newCat.label;
+          it.catKey=mapping[wrongName];
+          changed++;
+          orderChanged=true;
+        }
+      }
+    });
+    if(orderChanged) recalcTotalFinal(o);
+  });
+  // batch update ke Firestore
+  (cachedOrders||[]).forEach(o=>{
+    if((o.items||[]).some(it=>mapping[it.cat])){
+      db.collection('orders').doc(o.id).update({items:o.items, totalFinal:o.totalFinal||null, invoiceItems:o.invoiceItems||[]}).catch(e=>{});
+    }
+  });
+  document.getElementById('bulkfix-modal').innerHTML='';
+  document.getElementById('bulkfix-modal').style.display='none';
+  toast(`✅ ${changed} barang kategorinya diperbaiki & disimpan`,'ok');
+  if(typeof renderRekap==='function') renderRekap();
+  if(typeof filterOrders==='function') filterOrders();
+}
 function showAddInvoiceItemPicker(orderId){
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
   const allCats=(cachedSettings.cats||[]).filter(c=>!c.routes || c.routes.indexOf(o.route)>=0);
@@ -2401,7 +2592,10 @@ function openInvoiceModal(id){
     const needsPrice=it.adminPriced && !rateVal;
     return `
     <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:8px;${needsPrice?'border:1px solid rgba(212,160,23,.6)':''}" data-ividx="${realIdx}">
-      <div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--cream)">${catDisplayName(it)}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span>${it.adminByAdmin?' <span style="font-size:9px;font-weight:700;color:#D4A017;background:rgba(212,160,23,.12);padding:1px 6px;border-radius:5px">⚖️ TAMBAHAN ADMIN</span>':''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:6px;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:700;color:var(--cream)">${catDisplayName(it)}${it.desc?' — '+it.desc:''} <span style="color:var(--muted);font-weight:400">(est: ${it.qty} ${unit})</span>${it.adminByAdmin?' <span style="font-size:9px;font-weight:700;color:#D4A017;background:rgba(212,160,23,.12);padding:1px 6px;border-radius:5px">⚖️ TAMBAHAN ADMIN</span>':''}</div>
+        <button type="button" onclick="deleteAdminItem('${o.id}',${realIdx})" title="Hapus jenis barang ini" style="flex-shrink:0;background:rgba(212,80,74,.12);border:1px solid rgba(212,80,74,.3);color:#D4504A;border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer">🗑</button>
+      </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -2414,7 +2608,10 @@ function openInvoiceModal(id){
         <div class="field" style="margin:0"><label>Harga/<span id="ivunitlbl2-${realIdx}">${unit}</span>${needsPrice?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ivr-${realIdx}" value="${rateVal}" placeholder="${it.adminPriced?'wajib isi':''}" style="${needsPrice?'border:2px solid #D4A017':''}" oninput="calcInv()" inputmode="numeric"></div>
       </div>
       <div class="field" style="margin:0 0 8px;background:rgba(74,159,212,.06);border:1px solid rgba(74,159,212,.2);border-radius:7px;padding:7px 9px">
-        <label style="color:#4A9FD4;font-size:10px">🧮 Rate Cukai/<span id="ivcukaiunitlbl-${realIdx}">${unit}</span> (Rp, opsional — kosongkan jika tidak kena cukai)</label>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <label style="color:#4A9FD4;font-size:10px;margin:0">🧮 Rate Cukai/<span id="ivcukaiunitlbl-${realIdx}">${unit}</span> (Rp, opsional — kosongkan jika tidak kena cukai)</label>
+          <button type="button" onclick="document.getElementById('ivcukairate-${realIdx}').value='';calcInv()" title="Bersihkan rate cukai barang ini" style="flex-shrink:0;background:rgba(212,80,74,.1);border:1px solid rgba(212,80,74,.25);color:#D4504A;border-radius:5px;padding:1px 7px;font-size:9px;cursor:pointer">✕</button>
+        </div>
         <input type="number" id="ivcukairate-${realIdx}" value="${it.cukaiRate||''}" placeholder="mis. 60000" oninput="calcInv()" inputmode="numeric">
       </div>
       ${scaleGalleryHTML(o.id, realIdx, scalePhotosOf(it))}
@@ -3967,10 +4164,40 @@ function itemBeratKg(it){
   else if(map[it.cat]>0) per=map[it.cat];
   return q*(per>0?per:1);
 }
+// ── BOBOT UNTUK KAPASITAS SLOT (beda tujuan dari itemBeratKg) ──
+// KOREKSI BUG SERIUS (overbooking slot): tripUsedKg SEBELUMNYA memakai
+// itemBeratKg() yang HANYA menghitung barang berstatus 'approved' — cocok
+// untuk laporan keuangan (hanya barang yg dikonfirmasi yg boleh dihitung
+// sbg omzet), TAPI SALAH untuk pengecekan KAPASITAS SLOT: artinya order
+// yang masih 'pending' (belum sempat direview admin) TIDAK IKUT terhitung
+// sbg pemakaian slot sama sekali. Akibatnya banyak customer bisa terus
+// mengirim order pending pada trip yang sama — masing-masing melihat
+// "slot masih cukup" di app customer (yang membaca usedKg dari sini) —
+// padahal TOTAL pending yang menumpuk sudah jauh melebihi kapasitas asli,
+// dan admin baru sadar setelah semua order numpuk menunggu direview.
+// Sekarang barang berstatus 'pending' JUGA dihitung menempati slot (barang
+// baru berhenti menempati slot kalau admin benar2 menolaknya/'rejected',
+// atau customer minta batal & disetujui/'cancel_requested' tetap dihitung
+// sampai benar2 final ditolak — supaya tidak ada celah "klaim slot kosong").
+function itemBeratKgForCapacity(it){
+  if(!it) return 0;
+  if(it.status==='rejected') return 0; // hanya yang BENAR-BENAR ditolak yg tidak menempati slot lagi
+  const q=parseFloat(it.actQty!=null?it.actQty:it.qty)||0;
+  const unit=it.type||'kg';
+  if(unit!=='pcs') return q;
+  const map=(cachedSettings&&cachedSettings.kgPerPcs)||{};
+  let per=0;
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const cat=cats.find(c=>c.label===it.cat||c.key===it.cat);
+  if(cat && map[cat.key]>0) per=map[cat.key];
+  else if(map[it.cat]>0) per=map[it.cat];
+  return q*(per>0?per:1);
+}
 function tripUsedKg(tripId){
-  // Buang order yang dibatalkan seluruhnya; sisanya dihitung per-barang approved.
+  // Buang order yang dibatalkan seluruhnya; sisanya dihitung per-barang —
+  // pending DAN approved sama-sama menempati slot (lihat catatan di atas).
   const orders=(cachedOrders||[]).filter(o=>o.tripId===tripId && o.status!=='cancelled' && !o.cancelWholeOrder);
-  return orders.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+itemBeratKg(it),0),0);
+  return orders.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+itemBeratKgForCapacity(it),0),0);
 }
 // Tulis sisa slot ke dokumen trip supaya customer app bisa membacanya
 // TANPA perlu mengunduh data order customer lain (privasi terjaga).
