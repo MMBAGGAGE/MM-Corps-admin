@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v41 · nama jenis bersih & salam pembuka WA · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v43 · bongkar isi kategori (telusur ke order) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -576,12 +576,12 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
       </details>
     </div>
 
-    <!-- PERBAIKAN MASSAL KATEGORI -->
+    <!-- KLASIFIKASI BARANG -->
     <div class="sec-card" id="bulkfix-cat-section" style="border-color:rgba(74,159,212,.35);display:none">
-      <div class="sec-lbl" style="color:#4A9FD4">🔧 Perbaikan Massal Kategori</div>
-      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ditemukan kategori barang yang <strong>tidak sesuai dengan daftar Jenis Barang di Setting</strong> (mis. "Hp", "facial wash"). Klik tombol di bawah untuk melihat &amp; memperbaiki semuanya sekaligus.</div>
+      <div class="sec-lbl" style="color:#4A9FD4">🏷️ Klasifikasi Barang</div>
+      <div style="font-size:12px;color:var(--cream3);line-height:1.6;margin-bottom:10px">Ada barang yang <strong>belum punya kategori resmi</strong>, jadi di Rekap hanya masuk "Tambahan Admin"/"Lainnya". Buka daftarnya untuk melihat <strong>tiap barang lengkap dengan keterangan, pemilik, berat &amp; harganya</strong>, lalu tentukan kategorinya satu per satu.</div>
       <div id="bulkfix-count" style="font-size:11px;color:#4A9FD4;margin-bottom:10px;font-weight:700"></div>
-      <button class="btn btn-block" style="background:linear-gradient(135deg,#4A9FD4,#74A9D4);color:#fff" onclick="showBulkCategoryFixerModal()">🔧 Perbaiki Kategori Salah</button>
+      <button class="btn btn-block" style="background:linear-gradient(135deg,#4A9FD4,#74A9D4);color:#fff" onclick="showBulkCategoryFixerModal()">🏷️ Buka Daftar &amp; Klasifikasikan</button>
     </div>
 
     <!-- KEAMANAN: MIGRASI ORDER -->
@@ -1461,15 +1461,14 @@ function renderSettings(){
   if(cairoEl) cairoEl.value=dp['Cairo → Jakarta']?.address||'';
   if(jktEl) jktEl.value=dp['Jakarta → Cairo']?.address||'';
   // Check for mismatched categories
-  const wrong=scanMismatchedCategories();
-  const wrongNames=Object.keys(wrong);
+  const belum=scanUnclassifiedItems();
   const bulkSection=document.getElementById('bulkfix-cat-section');
   if(bulkSection){
-    if(wrongNames.length){
-      const count=wrongNames.reduce((s,k)=>s+wrong[k],0);
+    if(belum.length){
+      const nOrder=new Set(belum.map(x=>x.orderId)).size;
       bulkSection.style.display='block';
       const countEl=document.getElementById('bulkfix-count');
-      if(countEl) countEl.textContent=`🔴 ${wrongNames.length} nama kategori berbeda (${count} barang) yang perlu diperbaiki`;
+      if(countEl) countEl.textContent=`🔴 ${belum.length} barang dari ${nOrder} order belum punya kategori resmi`;
     }else{
       bulkSection.style.display='none';
     }
@@ -2216,93 +2215,225 @@ function commitChangeItemCategory(orderId, idx){
 // seharusnya sudah masuk kategori resmi). Scan semua order, list kategori
 // yg tidak ada di Settings, dan biarkan admin map-kan ulang semuanya sekaligus.
 // ══════════════════════════════════════════════════
-function scanMismatchedCategories(){
-  if(!cachedSettings.cats) return {};
-  const settingsKeys=new Set((cachedSettings.cats||[]).map(c=>[c.key, c.label]).flat());
-  const wrongCats={};
-  (cachedOrders||[]).forEach(o=>{
-    (o.items||[]).forEach(it=>{
-      const raw=it.cat||'';
-      if(!raw || settingsKeys.has(raw)) return; // skip yg kosong atau match
-      wrongCats[raw]=(wrongCats[raw]||0)+1;
-    });
-  });
-  return wrongCats;
-}
-function showBulkCategoryFixerModal(){
-  const wrong=scanMismatchedCategories();
-  const wrongNames=Object.keys(wrong).sort((a,b)=>wrong[b]-wrong[a]);
-  if(!wrongNames.length){ toast('Tidak ada kategori yang salah — semua sudah benar! ✅','ok'); return; }
-  const allCats=(cachedSettings.cats||[]).map(c=>({key:c.key,label:c.label}));
-  let html=`<div style="padding:16px">
-    <div style="font-size:13px;font-weight:800;color:var(--gold);margin-bottom:10px">🔧 Perbaikan Massal Kategori Salah</div>
-    <p style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">Ditemukan <strong>${wrongNames.length}</strong> nama kategori yang tidak sesuai Settings (total <strong>${wrongNames.reduce((s,k)=>s+wrong[k],0)}</strong> barang). Pilih kategori yg benar untuk tiap item di bawah, lalu terapkan semuanya.</p>
-    <div style="background:var(--dark4);border-radius:8px;padding:10px;margin-bottom:12px">`;
-  wrongNames.forEach((wrongName,idx)=>{
-    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
-      <div style="font-size:11px;color:var(--cream3)"><strong>"${wrongName}"</strong> <span style="color:var(--muted)">(${wrong[wrongName]} barang)</span></div>
-      <select id="bulkfix-${idx}" style="font-size:11px">
-        <option value="">— Pilih kategori yang benar —</option>
-        ${allCats.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
-      </select>
+// ══════════════════════════════════════════════════
+// 🏷️ PUSAT KLASIFIKASI BARANG (menggantikan "Perbaikan Massal Kategori")
+// KOREKSI: versi lama hanya menampilkan NAMA kategori bermasalah (mis.
+// "Tambahan Admin (5 barang)", "__LAIN__ (3 barang)") lalu meminta admin
+// memilih kategori penggantinya. Itu MUSTAHIL dijawab dengan benar — admin
+// tidak tahu barang mana saja yang dimaksud, apa isinya, milik siapa, dan
+// berapa beratnya. Selain itu 5 barang berbeda dipaksa masuk SATU kategori
+// yang sama, padahal isinya bisa beda-beda.
+// SEKARANG: klasifikasi dilakukan PER BARANG, dan setiap barang ditampilkan
+// lengkap dengan konteksnya (kode order, nama customer, tanggal, keterangan
+// barang, berat/jumlah, harga) supaya admin bisa memutuskan dengan yakin.
+// ══════════════════════════════════════════════════
+
+// Barang dianggap BELUM TERKLASIFIKASI kalau kategorinya tidak bisa
+// dipetakan ke satu pun kategori resmi di Setting.
+// ══════════════════════════════════════════════════
+// 🔎 BONGKAR ISI KATEGORI (Rekap → ketuk salah satu baris "Per Kategori")
+// Menjawab pertanyaan "kok bisa jadi segini?" langsung dari DATA ASLI:
+// menampilkan setiap barang penyusun angka itu — kode order, customer,
+// tanggal, keterangan, berat/jumlah, tarif, subtotal — DAN nilai MENTAH yang
+// tersimpan di database (`cat` & `catKey`).
+// Kolom mentah itu penting: kunci kategori bawaan berupa kata umum
+// ('Biasa','Elektronik','Rokok',...) sedangkan LABEL-nya bisa diganti kapan
+// saja di Setting. Begitu label diganti, SELURUH riwayat lama ikut terbaca
+// dengan nama baru — itulah sebabnya kiriman biasa bisa muncul di bawah nama
+// kategori yang sama sekali berbeda. Dengan kolom ini, barang yang "nyasar"
+// langsung ketahuan beserta order-nya, tanpa perlu menebak.
+// ══════════════════════════════════════════════════
+function showRekapCatRinci(ci){
+  const d=(window._rekapCatRinci||{})[ci];
+  if(!d || !d.rinci || !d.rinci.length){ toast('Rincian tidak tersedia','err'); return; }
+  const rows=d.rinci.slice().sort((a,b)=>b.sub-a.sub);
+  const totQty={};
+  rows.forEach(r=>{ totQty[r.unit]=(totQty[r.unit]||0)+r.qty; });
+  const totTxt=Object.entries(totQty).map(([u,v])=>(u==='pcs'?v.toFixed(0):v.toFixed(1))+' '+u).join(' + ');
+  const totRp=rows.reduce((s,r)=>s+r.sub,0);
+  // Tandai barang yang nilai mentahnya TIDAK sama dengan nama kategori yang
+  // ditampilkan — inilah kandidat "barang nyasar" akibat label yang diganti.
+  const kartu=rows.map(r=>{
+    const beda=(r.rawCat!==d.cat);
+    return `<div style="background:var(--dark4);border:1px solid ${beda?'rgba(212,160,23,.45)':'var(--border)'};border-radius:9px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--gold3)">${r.code}</div>
+        <div style="font-size:10px;color:var(--muted)">${r.tgl}</div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--cream);margin:3px 0 2px">${r.ket||'(tanpa keterangan)'}</div>
+      <div style="font-size:10px;color:var(--muted);line-height:1.6">
+        👤 ${r.cust} · ✈️ ${r.route}<br>
+        📦 ${r.unit==='pcs'?r.qty.toFixed(0):r.qty.toFixed(1)} ${r.unit} × ${fmtRp(r.rate)} = <strong style="color:var(--cream3)">${fmtRp(r.sub)}</strong><br>
+        🗄️ tersimpan sbg: <span style="font-family:var(--mono);color:${beda?'#D4A017':'var(--muted)'}">"${r.rawCat}"</span> · kunci: <span style="font-family:var(--mono)">${r.rawKey}</span>
+      </div>
+      ${beda?`<div style="font-size:9px;color:#D4A017;margin-top:5px">⚠️ Tersimpan dengan nama lain — kemungkinan besar label kategori pernah diganti di Setting, sehingga riwayat lama ikut terbaca sebagai "${d.cat}".</div>`:''}
     </div>`;
-  });
-  html+=`</div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="applyBulkCategoryFix()">✅ Terapkan Perbaikan</button>
-      <button class="btn btn-block btn-ghost" onclick="document.getElementById('bulkfix-modal').innerHTML='';document.getElementById('bulkfix-modal').style.display='none'">Batal</button>
+  }).join('');
+  let m=document.getElementById('rekap-cat-rinci');
+  if(!m){
+    m=document.createElement('div');
+    m.id='rekap-cat-rinci';
+    m.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(m);
+  }
+  m.innerHTML=`<div style="background:var(--dark2);border:1px solid var(--gold);border-radius:14px;width:100%;max-width:430px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 15px 11px;border-bottom:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:800;color:var(--gold)">🔎 Isi Kategori: ${d.cat}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">${rows.length} barang · ${totTxt} · <strong style="color:var(--cream3)">${fmtRp(totRp)}</strong></div>
+      <div style="font-size:9px;color:var(--muted);margin-top:5px;line-height:1.5">Baris bergaris kuning = tersimpan dengan nama berbeda. Perbaiki lewat modal Kelola/Invoice order terkait, atau Setting → 🏷️ Klasifikasi Barang.</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:12px 15px;-webkit-overflow-scrolling:touch">${kartu}</div>
+    <div style="padding:12px 15px;border-top:1px solid var(--border)">
+      <button type="button" class="btn btn-block btn-ghost" onclick="tutupRekapCatRinci()">Tutup</button>
     </div>
   </div>`;
+  m.style.display='flex';
+}
+function tutupRekapCatRinci(){
+  const m=document.getElementById('rekap-cat-rinci');
+  if(m){ m.innerHTML=''; m.style.display='none'; }
+}
+function itemSudahTerklasifikasi(it){
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const raw=String((it&&it.cat)||'').trim();
+  const key=String((it&&it.catKey)||'').trim();
+  if(key && key!=='__LAIN__' && cats.some(c=>c.key===key)) return true;
+  if(raw && cats.some(c=>c.key===raw||c.label===raw)) return true;
+  return false;
+}
+// Kumpulkan SEMUA barang yang belum terklasifikasi, lengkap dgn konteksnya.
+function scanUnclassifiedItems(){
+  const out=[];
+  (cachedOrders||[]).forEach(o=>{
+    if(o.status==='cancelled') return;
+    (o.items||[]).forEach((it,idx)=>{
+      if(it.status==='rejected') return;
+      if(itemSudahTerklasifikasi(it)) return;
+      const q=(it.actQty!=null?it.actQty:it.qty)||0;
+      const r=(it.actRate!=null?it.actRate:it.rate)||0;
+      out.push({
+        orderId:o.id, idx,
+        code:o.code||o.id,
+        cust:o.name||'-',
+        route:o.route||'-',
+        tgl:(o.createdAt||'').slice(0,10)||new Date(o.ts||Date.now()).toISOString().slice(0,10),
+        ket:catNoteOf(it)||'(tanpa keterangan)',
+        asal:String(it.cat||'').trim()||'(kosong)',
+        qty:q, unit:it.type||'kg', rate:r, total:q*r,
+        dariAdmin:!!it.adminByAdmin
+      });
+    });
+  });
+  return out;
+}
+// Dipakai panel Setting utk menampilkan jumlah — tetap dipertahankan namanya
+// supaya pemanggil lama tidak perlu diubah.
+function scanMismatchedCategories(){
+  const map={};
+  scanUnclassifiedItems().forEach(x=>{ map[x.ket]=(map[x.ket]||0)+1; });
+  return map;
+}
+function showBulkCategoryFixerModal(){
+  const list=scanUnclassifiedItems();
+  if(!list.length){ toast('Semua barang sudah terklasifikasi ✅','ok'); return; }
+  window._klasifList=list;
+  const cats=(cachedSettings.cats||[]);
+  const opts=cats.map(c=>`<option value="${c.key}">${c.label} (${c.type||'kg'})</option>`).join('');
+
+  const kartu=list.map((x,i)=>`
+    <div style="background:var(--dark4);border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:9px">
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--gold3)">${x.code}</div>
+        <div style="font-size:10px;color:var(--muted)">${x.tgl}</div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--cream);margin-bottom:2px">${x.ket}</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:7px">
+        👤 ${x.cust} · ✈️ ${x.route}<br>
+        📦 ${x.qty} ${x.unit} · 💰 ${fmtRp(x.total)} · 🏷️ asal: "${x.asal}"${x.dariAdmin?' · ⚖️ tambahan admin':''}
+      </div>
+      <select id="klasif-${i}" style="font-size:11px">
+        <option value="">— Belum dipilih (lewati barang ini) —</option>
+        ${opts}
+      </select>
+    </div>`).join('');
+
   let m=document.getElementById('bulkfix-modal');
   if(!m){
     m=document.createElement('div');
     m.id='bulkfix-modal';
-    m.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
+    m.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:16px';
     document.body.appendChild(m);
   }
-  m.innerHTML=`<div style="background:var(--dark2);border:1px solid var(--gold);border-radius:12px;padding:0;max-width:420px;width:100%;max-height:80vh;overflow-y:auto">${html}</div>`;
+  m.innerHTML=`<div style="background:var(--dark2);border:1px solid var(--gold);border-radius:14px;width:100%;max-width:430px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 15px 10px;border-bottom:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:800;color:var(--gold)">🏷️ Klasifikasi Barang</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px">
+        <strong style="color:var(--cream3)">${list.length} barang</strong> belum punya kategori resmi. Tiap barang ditampilkan lengkap dengan keterangan, pemilik, berat & harganya — pilih kategori yang benar <strong>per barang</strong>. Yang dibiarkan kosong tidak akan diubah.
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:9px">
+        <select id="klasif-massal" style="flex:1;font-size:11px"><option value="">— Isi cepat semua yang kosong —</option>${opts}</select>
+        <button type="button" onclick="klasifIsiSemua()" style="flex-shrink:0;background:rgba(212,168,76,.15);border:1px solid rgba(212,168,76,.4);color:var(--gold);border-radius:7px;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer">Isi</button>
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:12px 15px;-webkit-overflow-scrolling:touch">${kartu}</div>
+    <div style="padding:12px 15px;border-top:1px solid var(--border);display:flex;gap:8px">
+      <button type="button" class="btn btn-block" style="background:linear-gradient(135deg,#2D7A4F,#4CAF7D);color:#fff" onclick="applyBulkCategoryFix()">✅ Simpan Klasifikasi</button>
+      <button type="button" class="btn btn-block btn-ghost" onclick="tutupKlasifikasi()">Batal</button>
+    </div>
+  </div>`;
   m.style.display='flex';
-  window._bulkFixWrongCats=wrongNames;
+}
+function tutupKlasifikasi(){
+  const m=document.getElementById('bulkfix-modal');
+  if(m){ m.innerHTML=''; m.style.display='none'; }
+  window._klasifList=null;
+}
+// Isi cepat: menaruh pilihan yang sama ke SEMUA baris yang masih kosong.
+// Sengaja hanya mengisi yang KOSONG supaya pilihan manual admin tidak tertimpa.
+function klasifIsiSemua(){
+  const v=(document.getElementById('klasif-massal')||{}).value||'';
+  if(!v){ toast('Pilih kategori dulu di kotak isi cepat','err'); return; }
+  const list=window._klasifList||[];
+  let n=0;
+  list.forEach((_,i)=>{
+    const sel=document.getElementById('klasif-'+i);
+    if(sel && !sel.value){ sel.value=v; n++; }
+  });
+  toast(n?('Terisi '+n+' barang — masih bisa diubah satu per satu'):'Semua sudah terisi','ok');
 }
 function applyBulkCategoryFix(){
-  if(!guard('bulkfixcat',800)) return;
-  const wrongNames=window._bulkFixWrongCats||[];
-  if(!wrongNames.length){ toast('Tidak ada data untuk diperbaiki','err'); return; }
-  const mapping={};
-  let hasEmpty=false;
-  wrongNames.forEach((wrongName,idx)=>{
-    const sel=document.getElementById('bulkfix-'+idx);
-    const newKey=sel?.value||'';
-    if(!newKey){ hasEmpty=true; return; }
-    mapping[wrongName]=newKey;
+  if(!guard('klasifikasi',800)) return;
+  const list=window._klasifList||[];
+  if(!list.length){ toast('Tidak ada data','err'); return; }
+  const cats=(cachedSettings.cats||[]);
+  const perOrder={};
+  let n=0;
+  list.forEach((x,i)=>{
+    const key=(document.getElementById('klasif-'+i)||{}).value||'';
+    if(!key) return; // dibiarkan kosong = sengaja dilewati
+    const cat=cats.find(c=>c.key===key); if(!cat) return;
+    const o=(cachedOrders||[]).find(y=>y.id===x.orderId); if(!o) return;
+    const it=(o.items||[])[x.idx]; if(!it) return;
+    // Keterangan asli DIPERTAHANKAN ke desc supaya tidak ada info yang hilang.
+    if(!it.desc && x.ket && x.ket!=='(tanpa keterangan)') it.desc=x.ket;
+    it.cat=cat.label;
+    it.catKey=cat.key;
+    if(cat.type) it.type=cat.type;
+    perOrder[o.id]=o;
+    n++;
   });
-  if(hasEmpty){ toast('Isi SEMUA pilihan kategori dulu','err'); return; }
-  let changed=0;
-  (cachedOrders||[]).forEach(o=>{
-    let orderChanged=false;
-    (o.items||[]).forEach(it=>{
-      const wrongName=it.cat||'';
-      if(mapping[wrongName]){
-        const newCat=(cachedSettings.cats||[]).find(c=>c.key===mapping[wrongName]);
-        if(newCat){
-          it.cat=newCat.label;
-          it.catKey=mapping[wrongName];
-          changed++;
-          orderChanged=true;
-        }
-      }
-    });
-    if(orderChanged) recalcTotalFinal(o);
+  if(!n){ toast('Belum ada barang yang dipilih kategorinya','err'); return; }
+  Object.values(perOrder).forEach(o=>{
+    try{ recalcTotalFinal(o); }catch(e){}
+    db.collection('orders').doc(o.id).update({
+      items:o.items,
+      totalFinal:(o.totalFinal!=null?o.totalFinal:null),
+      invoiceItems:o.invoiceItems||[]
+    }).catch(function(){});
   });
-  // batch update ke Firestore
-  (cachedOrders||[]).forEach(o=>{
-    if((o.items||[]).some(it=>mapping[it.cat])){
-      db.collection('orders').doc(o.id).update({items:o.items, totalFinal:o.totalFinal||null, invoiceItems:o.invoiceItems||[]}).catch(e=>{});
-    }
-  });
-  document.getElementById('bulkfix-modal').innerHTML='';
-  document.getElementById('bulkfix-modal').style.display='none';
-  toast(`✅ ${changed} barang kategorinya diperbaiki & disimpan`,'ok');
+  tutupKlasifikasi();
+  toast('✅ '+n+' barang diklasifikasikan ke kategori resmi','ok');
+  if(typeof renderSettings==='function') renderSettings();
   if(typeof renderRekap==='function') renderRekap();
   if(typeof filterOrders==='function') filterOrders();
 }
@@ -6724,11 +6855,28 @@ async function renderRekap(){
     byRoute[o.route]=(byRoute[o.route]||0)+orderRevenue(o);
     (o.items||[]).forEach(it=>{
       if(!itemIsBillable(it)) return;
-      const catName=catDisplayName(it); // KOREKSI: nama terkini dari Setting, bukan raw it.cat yg bisa berupa kode
-      byCat[catName]=byCat[catName]||{count:0,kg:0,rev:0};
+      const catName=catDisplayName(it); // nama terkini dari Setting
+      byCat[catName]=byCat[catName]||{count:0,kg:0,pcs:0,rev:0,orders:new Set(),rinci:[]};
       byCat[catName].count++;
-      byCat[catName].kg+=(it.actQty||it.qty||0);
-      byCat[catName].rev+=(it.actQty||it.qty||0)*(it.actRate||it.rate||0);
+      byCat[catName].orders.add(o.id);
+      // KOREKSI BUG SATUAN: kg dan pcs dihitung di ember terpisah sesuai
+      // satuan barangnya masing-masing (dulu dijumlah jadi satu lalu dilabeli "kg").
+      const _q=(it.actQty!=null?it.actQty:it.qty)||0;
+      const _r=(it.actRate!=null?it.actRate:it.rate)||0;
+      if((it.type||'kg')==='pcs') byCat[catName].pcs+=_q; else byCat[catName].kg+=_q;
+      byCat[catName].rev+=_q*_r;
+      // ── JEJAK AUDIT: simpan barang ASLI penyusun angka ini, lengkap dgn
+      // nilai MENTAH yang tersimpan di database (cat & catKey). Ini yang
+      // membuat angka janggal bisa ditelusuri sampai ke order-nya, tanpa
+      // perlu menebak-nebak dari luar.
+      byCat[catName].rinci.push({
+        code:o.code||o.id, cust:o.name||'-', route:o.route||'-',
+        tgl:(o.createdAt||'').slice(0,10)||'-',
+        ket:(it.desc||it.adminNote||'').trim(),
+        qty:_q, unit:it.type||'kg', rate:_r, sub:_q*_r,
+        rawCat:String(it.cat||'').trim()||'(kosong)',
+        rawKey:String(it.catKey||'').trim()||'(tidak ada)'
+      });
       // Kelengkapan foto & berat — sinyal cepat utk pengawasan, tanpa memuat gambar
       nItemsTotal++;
       if(!it.photo) nMissingCustPhoto++;
@@ -6785,7 +6933,16 @@ async function renderRekap(){
     </div>
     <div class="rek-card" style="margin-bottom:10px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Per Kategori</div>
-      ${Object.entries(byCat).map(([cat,d])=>`<div class="rek-row"><div><div style="color:var(--cream3);font-size:12px">${cat}</div><div style="font-size:10px;color:var(--muted)">${d.count} order · ${d.kg.toFixed(1)} kg</div></div><div style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(d.rev)}</div></div>`).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>'}
+      ${(()=>{window._rekapCatRinci={};return Object.entries(byCat).map(([cat,d],ci)=>{
+        window._rekapCatRinci[ci]={cat,rinci:d.rinci};
+        const _p=[];if(d.kg>0)_p.push(d.kg.toFixed(1)+' kg');if(d.pcs>0)_p.push(d.pcs.toFixed(0)+' pcs');
+        const _q=_p.join(' + ')||'0';
+        // KOREKSI: dulu tertulis "N order" padahal N adalah jumlah BARANG,
+        // bukan jumlah order — 1 order bisa berisi banyak barang di kategori
+        // yang sama, jadi angkanya menyesatkan. Sekarang keduanya jelas.
+        const _o=d.orders.size;
+        return `<div class="rek-row" onclick="showRekapCatRinci(${ci})" style="cursor:pointer"><div><div style="color:var(--cream3);font-size:12px">${cat} <span style="font-size:9px;color:var(--gold3)">🔎</span></div><div style="font-size:10px;color:var(--muted)">${d.count} barang · ${_o} order · ${_q}</div></div><div style="font-weight:700;font-family:'Space Mono',monospace;font-size:11px">${fmtRp(d.rev)}</div></div>`;
+      }).join('')||'<div style="color:var(--muted);font-size:12px">Belum ada data</div>';})()}
     </div>
 
     <div style="text-align:center;margin:6px 0 12px;position:relative"><div style="height:1px;background:var(--border)"></div><div style="position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:var(--dark2);padding:0 12px;font-size:10px;font-weight:800;color:#4A9FD4;letter-spacing:1.5px">🛂 LAPORAN 2 · CUKAI</div></div>
