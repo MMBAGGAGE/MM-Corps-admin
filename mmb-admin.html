@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v45 · dua catatan terpisah (customer & sistem) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v46 · batas slot per-trip & sisa slot di customer · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -738,6 +738,11 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
       <label>💰 Harga Khusus Trip Ini (opsional)</label>
       <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Isi hanya kategori yang harganya beda untuk trip ini. Yang kosong otomatis pakai harga default dari Setting. Harga ini yang dipakai customer saat memilih trip ini.</div>
       <div id="t-rates"></div>
+    </div>
+    <div class="field" style="background:rgba(74,159,212,.06);border:1px solid rgba(74,159,212,.28);border-radius:10px;padding:11px">
+      <label>⚖️ Batas Slot Khusus Trip Ini (opsional)</label>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">Isi hanya kategori yang batasnya beda untuk trip ini. Yang kosong otomatis memakai <strong>Batas Slot per Kategori</strong> dari Setting. Isi <strong>0</strong> = tidak dibatasi.</div>
+      <div id="t-slots"></div>
     </div>
     <div class="field" style="background:rgba(201,168,76,.06);border:1px solid var(--border);border-radius:10px;padding:11px">
       <label>🔗 Perjalanan PP (Pulang-Pergi)</label>
@@ -4501,10 +4506,21 @@ function syncTripCapacity(){
   cachedTrips.forEach(t=>{
     if(!t.docId) return;
     const used=Math.round(tripUsedKg(t.id)*10)/10;
+    // Pemakaian PER KATEGORI ikut diterbitkan ke dokumen trip supaya app
+    // customer bisa menampilkan sisa slot tanpa perlu membaca order milik
+    // customer lain (privasi tetap terjaga & Firestore Rules tetap ketat).
+    const slotUsed={};
+    ((cachedSettings&&cachedSettings.cats)||[]).forEach(c=>{
+      if(c.routes && t.route && !c.routes.includes(t.route)) return;
+      const v=Math.round(tripSlotUsed(t.id,c.key)*10)/10;
+      const lim=tripSlotLimit(t,c.key);
+      if(v>0||lim>0) slotUsed[c.key]={u:v,l:lim,t:c.type||'kg',n:c.label};
+    });
+    const berubahSlot=JSON.stringify(t.slotUsed||{})!==JSON.stringify(slotUsed);
     // hanya tulis kalau berubah, supaya tidak boros write
-    if(Math.abs((t.usedKg||0)-used)<0.05) return;
-    t.usedKg=used; // update cache lokal dulu
-    db.collection('trips').doc(t.docId).update({usedKg:used}).catch(function(){});
+    if(Math.abs((t.usedKg||0)-used)<0.05 && !berubahSlot) return;
+    t.usedKg=used; t.slotUsed=slotUsed; // update cache lokal dulu
+    db.collection('trips').doc(t.docId).update({usedKg:used,slotUsed:slotUsed}).catch(function(){});
   });
 }
 // ── PENYEGAR KAPASITAS/SLOT SEKETIKA ──
@@ -6218,7 +6234,67 @@ function openTripModal(docId){
   }
   // Render input harga per-trip per kategori
   renderTripRates(docId?(cachedTrips.find(x=>x.docId===docId)||{}):null);
+  renderTripSlots(docId?(cachedTrips.find(x=>x.docId===docId)||{}):null);
   openModal('modal-trip');
+}
+// ══════════════════════════════════════════════════
+// ⚖️ SLOT PER TRIP — mencegah satu kategori kebanjiran di satu trip
+// Sebelumnya batas slot HANYA global per rute (Setting), berlaku sama untuk
+// semua trip. Akibatnya satu trip bisa kelebihan pada kategori tertentu
+// meski total kg masih muat. Sekarang tiap trip bisa punya batas sendiri;
+// yang tidak diisi otomatis memakai batas global.
+// ══════════════════════════════════════════════════
+function tripSlotLimit(trip, catKey){
+  const per=(trip&&trip.tripSlots)||{};
+  if(per[catKey]!=null && per[catKey]!=='') return parseFloat(per[catKey])||0;
+  const g=(cachedSettings&&cachedSettings.slots)||{};
+  const rute=(trip&&trip.route)||'';
+  const gc=g[catKey];
+  if(gc && typeof gc==='object') return parseFloat(gc[rute])||0;
+  return parseFloat(gc)||0;
+}
+// Pemakaian slot kategori tsb pada satu trip. Memakai satuan asli kategori
+// (kg tetap kg, pcs tetap pcs) dan menghitung barang pending + approved,
+// sejalan dgn aturan kapasitas trip.
+function tripSlotUsed(tripId, catKey){
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const cat=cats.find(c=>c.key===catKey);
+  const label=cat?cat.label:'';
+  return (cachedOrders||[])
+    .filter(o=>o.tripId===tripId && o.status!=='cancelled' && !o.cancelWholeOrder)
+    .reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>{
+      if(it.status==='rejected') return ss;
+      const k=String(it.catKey||'').trim(), r=String(it.cat||'').trim();
+      const cocok=(k&&k===catKey)||r===catKey||(label&&r===label);
+      if(!cocok) return ss;
+      return ss+((it.actQty!=null?it.actQty:it.qty)||0);
+    },0),0);
+}
+function renderTripSlots(trip){
+  const box=document.getElementById('t-slots'); if(!box) return;
+  const cats=(cachedSettings&&cachedSettings.cats)||[];
+  const rute=(trip&&trip.route)||document.getElementById('t-route')?.value||'';
+  const per=(trip&&trip.tripSlots)||{};
+  const inp='background:var(--dark5);border:1px solid var(--border2);border-radius:7px;padding:7px;font-size:12px;color:var(--cream);text-align:right;width:100%';
+  const pakai=cats.filter(c=>!c.routes||!rute||c.routes.includes(rute));
+  if(!pakai.length){ box.innerHTML='<div style="font-size:11px;color:var(--muted)">Belum ada kategori.</div>'; return; }
+  box.innerHTML=pakai.map(c=>{
+    const glob=tripSlotLimit({route:rute},c.key);
+    const v=(per[c.key]!=null&&per[c.key]!=='')?per[c.key]:'';
+    const dipakai=trip&&trip.id?tripSlotUsed(trip.id,c.key):0;
+    const batas=tripSlotLimit(Object.assign({},trip||{},{route:rute}),c.key);
+    const unit=c.type||'kg';
+    const lebih=batas>0&&dipakai>batas;
+    return `<div style="display:grid;grid-template-columns:1fr 88px;gap:8px;align-items:center;margin-bottom:7px">
+      <div>
+        <div style="font-size:12px;color:var(--cream)">${c.label}</div>
+        <div style="font-size:9px;color:${lebih?'#D4504A':'var(--muted)'}">
+          global: ${glob>0?glob+' '+unit:'tanpa batas'}${trip&&trip.id?` · terpakai: ${dipakai} ${unit}${batas>0?' / '+batas:''}${lebih?' ⚠️ LEBIH':''}`:''}
+        </div>
+      </div>
+      <input type="number" id="tslot-${c.key}" value="${v}" placeholder="${glob||0}" inputmode="numeric" style="${inp}">
+    </div>`;
+  }).join('');
 }
 function renderTripRates(trip){
   const box=document.getElementById('t-rates'); if(!box) return;
@@ -6262,6 +6338,7 @@ async function saveTrip(){
     route:document.getElementById('t-route').value,date,
     arrive:document.getElementById('t-arrive').value,
     capacity:parseFloat(document.getElementById('t-cap').value)||0,
+    tripSlots:(function(){const o={};((cachedSettings&&cachedSettings.cats)||[]).forEach(c=>{const el=document.getElementById('tslot-'+c.key);if(el&&el.value!=='')o[c.key]=parseFloat(el.value)||0;});return o;})(),
     courier:document.getElementById('t-courier').value.trim(),
     cutoff:document.getElementById('t-cutoff').value,
     waGroupLink:document.getElementById('t-wagroup').value.trim(),
