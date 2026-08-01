@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v46 · batas slot per-trip & sisa slot di customer · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v47 · konfirmasi WA sesuai tujuan & tujuan per barang · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2095,6 +2095,15 @@ function openOrderModal(id){
         </div>
       </div>
       ${it.photo?`<div style="margin-bottom:8px"><div style="font-size:10px;color:#4A9FD4;font-weight:700;margin-bottom:4px">📸 Foto contoh dari customer (ketuk untuk lihat &amp; simpan):</div><img src="${it.photo}" onclick="bukaFotoItem('${id}',${i})" style="width:100%;max-height:200px;object-fit:cover;border-radius:9px;cursor:pointer"><button class="btn btn-dark" style="width:100%;margin-top:6px;padding:7px;font-size:11px" onclick="simpanFotoItem('${id}',${i})">⬇ Simpan Foto</button></div>`:''}
+      ${it.dest&&it.dest.address?`<div style="background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.3);border-radius:9px;padding:9px;margin-bottom:8px">
+        <div style="font-size:10px;font-weight:800;color:var(--gold);margin-bottom:4px">📍 TUJUAN KHUSUS BARANG INI</div>
+        <div style="font-size:11px;color:var(--cream3);line-height:1.6">
+          👤 ${it.dest.rcvName||'-'}${it.dest.rcvPhone?` · <a href="https://wa.me/${String(it.dest.rcvPhone).replace(/\D/g,'')}" target="_blank" style="color:#25D366;text-decoration:none">${it.dest.rcvPhone}</a>`:''}<br>
+          🏠 ${it.dest.address||'-'}<br>
+          🚚 ${it.dest.ekspedisi||'-'}
+        </div>
+        <button type="button" onclick="salinTujuanBarang('${id}',${i})" style="margin-top:6px;background:var(--dark5);border:1px solid var(--border2);color:var(--cream3);border-radius:7px;padding:5px 9px;font-size:10px;cursor:pointer">📋 Salin alamat</button>
+      </div>`:''}
       <div class="field" style="margin-bottom:6px"><label>💬 Catatan untuk Customer</label><input type="text" id="in-${i}" value="${it.adminNote||''}" placeholder="Alasan ditolak, info tambahan..."><div style="font-size:9px;color:var(--muted);margin-top:3px">Dibaca customer di halaman resi &amp; ikut terkirim lewat WhatsApp.</div></div>
       <div class="field" style="margin-bottom:8px"><label>🏷️ Catatan Admin / Sistem</label><input type="text" id="is-${i}" list="syslist-global" value="${it.sysNote||''}" placeholder="mis. Elektronik, Obat &amp; Herbal, Makanan Ringan..."><div style="font-size:9px;color:var(--muted);margin-top:3px">Hanya untuk internal — <strong>tidak dilihat customer</strong>. Isian ini yang menentukan barang ini masuk kelompok apa di Rekap.</div></div>
       <div style="display:flex;gap:6px">
@@ -2121,6 +2130,7 @@ function openOrderModal(id){
       ${o.note?`<div style="color:var(--muted)">Catatan: ${o.note}</div>`:''}
     </div>
 
+    ${destSummaryHTML(o)}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--gold3);letter-spacing:1px;margin-bottom:10px">Barang & Persetujuan Per Item</div>
     ${itemsHTML}
     <button class="btn btn-block" onclick="addAdminItem('${id}')" style="background:transparent;border:1px dashed var(--gold3);color:var(--gold);margin-bottom:8px">➕ Tambah Barang (dikirim tapi tak didaftarkan customer)</button>
@@ -2772,8 +2782,16 @@ function sendWA(id,overrideSt){
     grupWA='\n\n━━━━━━━━━━━━━━\n🔔 *WAJIB GABUNG GRUP WHATSAPP TRIP*\nLink grup akan kami kirimkan sesaat lagi. Mohon *segera gabung* saat linknya dibagikan — semua info penting diumumkan di sana, dan bisa juga dipantau lewat menu *Cek Status* di aplikasi.';
   }
 
-  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 *KODE: ${o.code||o.id}*\n🗺️ Rute: *${o.route}*${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 *Total: ${fmtRp(total)}*\n💳 *Bayar: ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${grupWA}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
-  window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(waSalam(msg)),'_blank');
+  const msg=`Halo *{{SAPAAN}}* 👋\n\n${waMustReadNotice()}\n*[UPDATE ORDER] M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 *KODE: ${o.code||o.id}*\n🗺️ Rute: *${o.route}*${o.tripId?'\n✈️ Trip      : '+o.tripId:''}\n💰 *Total: ${fmtRp(total)}*\n💳 *Bayar: ${o.payStatus==='lunas'?'✅ Lunas':o.payStatus==='dp'?'🔶 DP':'⏳ Belum'}\n━━━━━━━━━━━━━━\n${msgs[st]||''}${rincian}${o.statusNote?'\n\n📝 Info: '+o.statusNote:''}${grupWA}${maklumat}\n\nAda pertanyaan? Balas pesan ini 🙏\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  // KOREKSI: dulu SELALU dikirim ke nomor PENGIRIM dgn sapaan nama PENGIRIM,
+  // tanpa pilihan. Sekarang admin memilih tujuan, dan sapaannya otomatis
+  // menyesuaikan orang yang dituju.
+  const rcvTel=(o.rcvPhone||'').replace(/\D/g,'');
+  _pendingInvoice={ id:o.id, msg, sender:phone, rcv:rcvTel,
+    senderName:o.name||'Pengirim', rcvName:o.rcvName||'Penerima',
+    judul:'📨 Kirim update status ke mana?' };
+  if(!phone && !rcvTel){ toast('Nomor WA pengirim/penerima tidak tersedia','err'); return; }
+  showInvoiceTargetPicker();
 }
 
 // ── INVOICE ───────────────────────────────────
@@ -2960,7 +2978,7 @@ async function saveInvoice(){
   // ── INVOICE PENAGIHAN — dokumen TAGIHAN, bukan bukti lunas ──
   // Sengaja TIDAK pernah mengklaim "sudah lunas" atau "Selesai" di sini.
   // Konfirmasi lunas & Selesai punya pesan SENDIRI: lihat kirimKwitansiLunas().
-  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*INVOICE PENAGIHAN — M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode  : *${o.code||o.id}*\n📅 Tgl    : ${new Date().toLocaleDateString('id-ID')}\n━━━━━━━━━━━━━━\n${lines}${cukai?'\n• Cukai/Pajak : '+fmtRp(cukai):''}\n━━━━━━━━━━━━━━\n💰 *TOTAL TAGIHAN: ${fmtRp(total)}*\n\nMohon lakukan pembayaran sesuai total di atas 🙏\nBukti transfer akan kami konfirmasi terpisah setelah diverifikasi admin.\n\n✨ _Kepercayaan Anda adalah prioritas kami._ Kami berkomitmen menghadirkan layanan pengiriman bagasi Cairo–Jakarta yang *aman, cepat, dan transparan* untuk Anda.\n━━━━━━━━━━━━━━\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  const msg=`Halo *{{SAPAAN}}* 👋\n\n${waMustReadNotice()}\n*INVOICE PENAGIHAN — M.M BAGGAGE*\n━━━━━━━━━━━━━━\n📋 Kode  : *${o.code||o.id}*\n📅 Tgl    : ${new Date().toLocaleDateString('id-ID')}\n━━━━━━━━━━━━━━\n${lines}${cukai?'\n• Cukai/Pajak : '+fmtRp(cukai):''}\n━━━━━━━━━━━━━━\n💰 *TOTAL TAGIHAN: ${fmtRp(total)}*\n\nMohon lakukan pembayaran sesuai total di atas 🙏\nBukti transfer akan kami konfirmasi terpisah setelah diverifikasi admin.\n\n✨ _Kepercayaan Anda adalah prioritas kami._ Kami berkomitmen menghadirkan layanan pengiriman bagasi Cairo–Jakarta yang *aman, cepat, dan transparan* untuk Anda.\n━━━━━━━━━━━━━━\n_M.M Baggage — Cairo ↔ Jakarta_`;
   // Simpan pesan + tujuan, lalu tampilkan pemilih tujuan (fleksibel: pengirim / penerima / keduanya)
   const sender=(o.phone||'').replace(/\D/g,'');
   const rcv=(o.rcvPhone||'').replace(/\D/g,'');
@@ -2975,10 +2993,10 @@ function showInvoiceTargetPicker(){
   if(!m){ m=document.createElement('div'); m.id='inv-target-picker'; m.style.cssText='position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px'; document.body.appendChild(m); }
   const btn=(label,sub,onclick,show)=> show?`<button onclick="${onclick}" style="display:block;width:100%;background:linear-gradient(135deg,#075E54,#25D366);color:#fff;border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:800;cursor:pointer;margin-bottom:9px;text-align:left">${label}<div style="font-size:10px;font-weight:500;opacity:.9">${sub}</div></button>`:'';
   m.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--gold);border-radius:16px;padding:18px;max-width:340px;width:100%">
-    <div style="font-size:14px;font-weight:800;color:var(--gold);margin-bottom:4px">🧾 Kirim Invoice ke mana?</div>
+    <div style="font-size:14px;font-weight:800;color:var(--gold);margin-bottom:4px">${pi.judul||'🧾 Kirim Invoice ke mana?'}</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Pilih tujuan pengiriman invoice via WhatsApp.</div>
-    ${btn('📤 Kirim ke Pengirim','+'+pi.sender+' · '+pi.senderName,"kirimInvoiceWA('sender')",!!pi.sender)}
-    ${btn('📥 Kirim ke Penerima','+'+pi.rcv+' · '+pi.rcvName,"kirimInvoiceWA('receiver')",!!pi.rcv)}
+    ${btn('📤 Pengirim — '+(pi.senderName||'-'),'+'+pi.sender,"kirimInvoiceWA('sender')",!!pi.sender)}
+    ${btn('📥 Penerima — '+(pi.rcvName||'-'),'+'+pi.rcv,"kirimInvoiceWA('receiver')",!!pi.rcv)}
     ${btn('📤📥 Kirim ke Keduanya','Pengirim lalu penerima',"kirimInvoiceWA('both')",!!(pi.sender&&pi.rcv&&pi.sender!==pi.rcv))}
     <button onclick="closeInvoiceTargetPicker()" style="display:block;width:100%;background:#1F1F26;color:#C8C0B0;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-top:4px">Nanti saja</button>
   </div>`;
@@ -2987,11 +3005,18 @@ function showInvoiceTargetPicker(){
 function closeInvoiceTargetPicker(){ const m=document.getElementById('inv-target-picker'); if(m){ m.style.display='none'; m.innerHTML=''; } }
 function kirimInvoiceWA(target){
   const pi=_pendingInvoice; if(!pi) return;
-  const txt=encodeURIComponent(waSalam(pi.msg));
-  const open=(tel)=>{ if(tel) window.open('https://wa.me/'+tel+'?text='+txt,'_blank'); };
-  if(target==='sender') open(pi.sender);
-  else if(target==='receiver') open(pi.rcv);
-  else if(target==='both'){ open(pi.sender); setTimeout(()=>open(pi.rcv),1200); }
+  // KOREKSI BUG MEMALUKAN: dulu isi pesan dibuat SEKALI memakai nama PENGIRIM,
+  // lalu dikirim ke pengirim ATAU penerima. Akibatnya penerima (mis. Aceng)
+  // menerima pesan yang menyapa "Halo *Budi*". Sekarang sapaan diganti
+  // menyesuaikan SIAPA yang benar-benar dituju.
+  const open=(tel,nama)=>{
+    if(!tel) return;
+    const teks=waSalam(String(pi.msg||'').split('{{SAPAAN}}').join(nama||'Kak'));
+    window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(teks),'_blank');
+  };
+  if(target==='sender') open(pi.sender,pi.senderName);
+  else if(target==='receiver') open(pi.rcv,pi.rcvName);
+  else if(target==='both'){ open(pi.sender,pi.senderName); setTimeout(()=>open(pi.rcv,pi.rcvName),1200); }
   closeInvoiceTargetPicker();
   toast('Invoice dibuka di WhatsApp ✅','ok');
 }
@@ -3189,7 +3214,7 @@ function kirimKwitansiLunas(orderId){
   const tagihan=(o.totalFinal&&o.totalFinal>0)?Math.round(o.totalFinal):Math.round(orderRevenue(o));
   const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
   const fbUrl=trackUrl+'#feedback';
-  const msg=`Halo *${o.name}* 👋\n\n${waMustReadNotice()}\n*KWITANSI PEMBAYARAN LUNAS*\n━━━━━━━━━━━━━━\n📋 Kode        : *${o.code||o.id}*\n📅 Tgl Bayar   : ${p.date||new Date().toISOString().slice(0,10)}\n💳 Metode      : ${/cash/i.test(p.method||'')?'💵 Cash':'🏦 Transfer'}\n💰 Diterima    : *${fmtRp(p.amount||0)}*\n━━━━━━━━━━━━━━\n✅ *PEMBAYARAN SUDAH DITERIMA & LUNAS*\n✅ *Status Pesanan: SELESAI*\n\nTerima kasih atas kepercayaan Anda! 🙏 Pesanan Anda telah kami proses tuntas dari awal hingga akhir.\n\n⭐ *Bagaimana pengalaman Anda bersama kami?*\nLuangkan 30 detik untuk beri bintang, kesan, & saran di:\n👉 ${fbUrl}\n\nMasukan Anda membantu M.M Baggage terus berkembang & melayani lebih baik. 🌟\n━━━━━━━━━━━━━━\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  const msg=`Halo *{{SAPAAN}}* 👋\n\n${waMustReadNotice()}\n*KWITANSI PEMBAYARAN LUNAS*\n━━━━━━━━━━━━━━\n📋 Kode        : *${o.code||o.id}*\n📅 Tgl Bayar   : ${p.date||new Date().toISOString().slice(0,10)}\n💳 Metode      : ${/cash/i.test(p.method||'')?'💵 Cash':'🏦 Transfer'}\n💰 Diterima    : *${fmtRp(p.amount||0)}*\n━━━━━━━━━━━━━━\n✅ *PEMBAYARAN SUDAH DITERIMA & LUNAS*\n✅ *Status Pesanan: SELESAI*\n\nTerima kasih atas kepercayaan Anda! 🙏 Pesanan Anda telah kami proses tuntas dari awal hingga akhir.\n\n⭐ *Bagaimana pengalaman Anda bersama kami?*\nLuangkan 30 detik untuk beri bintang, kesan, & saran di:\n👉 ${fbUrl}\n\nMasukan Anda membantu M.M Baggage terus berkembang & melayani lebih baik. 🌟\n━━━━━━━━━━━━━━\nTerimakasih sudah mempercayakan pengiriman Barang anda kepada kami, sampai Jumpa di order selanjutnya 😇\n_M.M Baggage — Cairo ↔ Jakarta_`;
   const sender=(o.phone||'').replace(/\D/g,'');
   const rcv=(o.rcvPhone||'').replace(/\D/g,'');
   _pendingInvoice={ id:o.id, msg, sender, rcv, senderName:o.name||'Pengirim', rcvName:o.rcvName||'Penerima' };
@@ -6270,6 +6295,97 @@ function tripSlotUsed(tripId, catKey){
       return ss+((it.actQty!=null?it.actQty:it.qty)||0);
     },0),0);
 }
+// ══════════════════════════════════════════════════
+// 📍 TUJUAN PENGIRIMAN PER BARANG (jastip) — alat bantu admin
+// Satu order jastip bisa berisi banyak barang dengan alamat berbeda-beda.
+// Fungsi ini merangkum semuanya jadi daftar siap salin, dikelompokkan per
+// alamat, supaya admin tidak perlu menyalin satu per satu ke ekspedisi.
+// ══════════════════════════════════════════════════
+function _destKey(d){
+  if(!d||!d.address) return '';
+  return [String(d.rcvName||'').trim().toLowerCase(),String(d.address||'').trim().toLowerCase()].join('|');
+}
+function orderDestGroups(o){
+  const grup={};
+  (o.items||[]).forEach((it,idx)=>{
+    if(it.status==='rejected') return;
+    const d=(it.dest&&it.dest.address)?it.dest:{
+      rcvName:o.rcvName||'', rcvPhone:o.rcvPhone||'',
+      address:o.address||'', ekspedisi:o.ekspedisi||'', _utama:true
+    };
+    if(!d.address) return;
+    const k=_destKey(d)||'__utama__';
+    if(!grup[k]) grup[k]={dest:d, items:[]};
+    grup[k].items.push({idx, it});
+  });
+  return Object.values(grup);
+}
+function salinTeks(teks, pesan){
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(teks); toast(pesan||'Disalin ✅','ok'); return;
+    }
+  }catch(e){}
+  try{
+    const ta=document.createElement('textarea'); ta.value=teks;
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    toast(pesan||'Disalin ✅','ok');
+  }catch(e){ toast('Gagal menyalin','err'); }
+}
+function salinTujuanBarang(orderId, idx){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const it=(o.items||[])[idx]; if(!it) return;
+  const d=(it.dest&&it.dest.address)?it.dest:{rcvName:o.rcvName,rcvPhone:o.rcvPhone,address:o.address,ekspedisi:o.ekspedisi};
+  salinTeks([
+    'Penerima : '+(d.rcvName||'-'),
+    'No. WA   : '+(d.rcvPhone||'-'),
+    'Alamat   : '+(d.address||'-'),
+    'Ekspedisi: '+(d.ekspedisi||'-'),
+    'Barang   : '+catDisplayName(it)+(it.desc?' — '+it.desc:''),
+    'Jumlah   : '+((it.actQty!=null?it.actQty:it.qty)||0)+' '+(it.type||'kg'),
+    'Kode     : '+(o.code||o.id)
+  ].join('\n'),'Alamat barang disalin ✅');
+}
+function salinSemuaTujuan(orderId){
+  const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
+  const grup=orderDestGroups(o);
+  if(!grup.length){ toast('Tidak ada alamat tujuan','err'); return; }
+  const teks=grup.map((g,n)=>{
+    const d=g.dest;
+    return ['── TUJUAN '+(n+1)+' ──',
+      'Penerima : '+(d.rcvName||'-'),
+      'No. WA   : '+(d.rcvPhone||'-'),
+      'Alamat   : '+(d.address||'-'),
+      'Ekspedisi: '+(d.ekspedisi||'-'),
+      'Barang   :',
+      ...g.items.map(x=>'  • '+catDisplayName(x.it)+(x.it.desc?' — '+x.it.desc:'')+' ('+((x.it.actQty!=null?x.it.actQty:x.it.qty)||0)+' '+(x.it.type||'kg')+')')
+    ].join('\n');
+  }).join('\n\n');
+  salinTeks('DAFTAR TUJUAN — '+(o.code||o.id)+'\n\n'+teks, grup.length+' tujuan disalin ✅');
+}
+function destSummaryHTML(o){
+  const grup=orderDestGroups(o);
+  const banyak=grup.length>1;
+  if(!banyak) return '';
+  return `<div class="sec-card" style="border-color:rgba(201,168,76,.4);margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">📍 ${grup.length} Tujuan Pengiriman</div>
+      <button type="button" onclick="salinSemuaTujuan('${o.id}')" style="background:var(--dark5);border:1px solid var(--border2);color:var(--cream3);border-radius:7px;padding:5px 9px;font-size:10px;cursor:pointer;flex-shrink:0">📋 Salin semua</button>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:9px;line-height:1.5">Order ini dikirim ke lebih dari satu alamat (jastip). Pastikan tiap barang masuk paket yang benar.</div>
+    ${grup.map((g,n)=>`<div style="background:var(--dark4);border-radius:8px;padding:9px;margin-bottom:7px">
+      <div style="font-size:10px;font-weight:700;color:var(--gold3);margin-bottom:3px">TUJUAN ${n+1}${g.dest._utama?' (alamat utama order)':''}</div>
+      <div style="font-size:11px;color:var(--cream3);line-height:1.6">
+        👤 ${g.dest.rcvName||'-'}${g.dest.rcvPhone?' · '+g.dest.rcvPhone:''}<br>
+        🏠 ${g.dest.address||'-'}<br>
+        🚚 ${g.dest.ekspedisi||'-'}
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:5px;line-height:1.6">
+        ${g.items.map(x=>'📦 '+catDisplayName(x.it)+(x.it.desc?' — '+x.it.desc:'')+' ('+((x.it.actQty!=null?x.it.actQty:x.it.qty)||0)+' '+(x.it.type||'kg')+')').join('<br>')}
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
 function renderTripSlots(trip){
   const box=document.getElementById('t-slots'); if(!box) return;
   const cats=(cachedSettings&&cachedSettings.cats)||[];
@@ -6451,19 +6567,17 @@ function waMustReadNotice(){
 }
 function notifPhotoUploaded(o){
   const trackUrl='https://mmbaggage.github.io/MM-Corps-Custumer/mmb-customer.html';
-  const msg=`Halo 👋\n\n${waMustReadNotice()}\n*📸 FOTO BARANG SUDAH DIUPDATE*\n━━━━━━━━━━━━━━\n📋 Kode: *${o.code||o.id}*\n📦 Barang kamu sudah *tiba di gudang Jakarta* & sudah difoto oleh kurir kami!\n━━━━━━━━━━━━━━\nCek foto barangmu di:\n${trackUrl}\n(masukkan kode ${o.code||o.id})\n\n💬 Jangan lupa pantau grup WhatsApp trip untuk info jadwal keberangkatan & pengambilan.\n\n_M.M Baggage — Cairo ↔ Jakarta_`;
-  const phones=[];
-  const sender=(o.phone||'').replace(/\D/g,''); if(sender) phones.push({n:sender,l:'Pemesan'});
-  const rcv=(o.rcvPhone||'').replace(/\D/g,''); if(rcv && rcv!==sender) phones.push({n:rcv,l:'Penerima Cairo'});
-  if(!phones.length){ toast('Nomor WA tidak ada untuk notif','info'); return; }
-  // Tampilkan dialog konfirmasi kirim
-  setTimeout(function(){
-    if(confirm('Kirim notif foto ke '+phones.map(p=>p.l).join(' & ')+'?')){
-      phones.forEach(function(p,i){
-        setTimeout(function(){ window.open('https://wa.me/'+p.n+'?text='+encodeURIComponent(waSalam(msg)),'_blank'); }, i*800);
-      });
-    }
-  }, 600);
+  const msg=`Halo *{{SAPAAN}}* 👋\n\n${waMustReadNotice()}\n*📸 FOTO BARANG SUDAH DIUPDATE*\n━━━━━━━━━━━━━━\n📋 Kode: *${o.code||o.id}*\n📦 Barang kamu sudah *tiba di gudang Jakarta* & sudah difoto oleh kurir kami!\n━━━━━━━━━━━━━━\nCek foto barangmu di:\n${trackUrl}\n(masukkan kode ${o.code||o.id})\n\n💬 Jangan lupa pantau grup WhatsApp trip untuk info jadwal keberangkatan & pengambilan.\n\n_M.M Baggage — Cairo ↔ Jakarta_`;
+  // KOREKSI: dulu langsung mengirim ke pengirim DAN penerima sekaligus lewat
+  // confirm(), tanpa memberi admin pilihan tujuan. Sekarang memakai pemilih
+  // tujuan yang sama dengan konfirmasi lain, supaya konsisten & tidak salah orang.
+  const sender=(o.phone||'').replace(/\D/g,'');
+  const rcv=(o.rcvPhone||'').replace(/\D/g,'');
+  if(!sender && !rcv){ toast('Nomor WA tidak ada untuk notif','info'); return; }
+  _pendingInvoice={ id:o.id, msg, sender, rcv,
+    senderName:o.name||'Pengirim', rcvName:o.rcvName||'Penerima',
+    judul:'📸 Kirim notif foto ke mana?' };
+  setTimeout(showInvoiceTargetPicker, 400);
 }
 
 // Kompresi foto: resize (maks 900px sisi terpanjang) + JPEG kualitas adaptif.
