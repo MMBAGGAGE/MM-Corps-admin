@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v48 · tujuan lengkap (jastip) & tutorial rute · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v49 · perbaiki foto timbangan tidak tersimpan (ID ganda Kelola/Invoice) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2092,7 +2092,7 @@ function openOrderModal(id){
         <div class="field" style="margin:0"><label>Berat/Qty Aktual</label><input type="number" id="iq-${i}" value="${it.actQty??it.qty}" step="0.01" inputmode="decimal"></div>
         <div class="field" style="margin:0"><label>Harga/<span id="unitlbl-${i}">${it.type||'kg'}</span>${it.adminPriced?' <span style="color:#D4A017">⚖️ wajib isi</span>':''}</label><input type="number" id="ir-${i}" value="${itemRateInputValue(it)}" placeholder="${it.adminPriced?'Tentukan harga...':''}" style="${it.adminPriced&&!itemRateInputValue(it)?'border:2px solid #D4A017':''}" inputmode="numeric"></div>
       </div>
-      <div style="margin-bottom:8px">${scaleGalleryHTML(id, i, scalePhotosOf(it))}</div>
+      <div style="margin-bottom:8px">${scaleGalleryHTML(id, i, scalePhotosOf(it), 'ord')}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <label style="font-size:11px;color:var(--muted)">Satuan:</label>
         <div style="display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -2859,7 +2859,7 @@ function openInvoiceModal(id){
         </div>
         <input type="number" id="ivcukairate-${realIdx}" value="${it.cukaiRate||''}" placeholder="mis. 60000" oninput="calcInv()" inputmode="numeric">
       </div>
-      ${scaleGalleryHTML(o.id, realIdx, scalePhotosOf(it))}
+      ${scaleGalleryHTML(o.id, realIdx, scalePhotosOf(it), 'inv')}
     </div>`;
   }).join('');
 
@@ -6670,28 +6670,38 @@ function scalePhotosOf(it){
   if(it.scalePhoto) return [it.scalePhoto];
   return [];
 }
-function scaleGalleryInnerHTML(orderId, idx, photos){
-  const input=`<input type="file" accept="image/*" id="scale-photo-input-${idx}" style="display:none" onchange="handleScalePhotoPick(this,'${orderId}',${idx})">`;
+// KOREKSI BUG SERIUS ("foto timbangan tidak tersimpan"): Kelola (mod-order-body)
+// dan Invoice (invoice-form) adalah DUA container TERPISAH yang TIDAK saling
+// membersihkan saat modal lain dibuka/ditutup. Kalau admin pernah membuka
+// KEDUA modal untuk order yang sama dalam satu sesi (alur yang sangat umum),
+// kedua container SAMA-SAMA berisi elemen ber-ID "scale-gallery-wrap-N" dan
+// "scale-photo-input-N" — ID GANDA di DOM. document.getElementById hanya
+// menemukan yang PERTAMA, yang bisa saja berada di modal yang SEDANG
+// TERSEMBUNYI. Akibatnya: (a) tombol "+ Foto" bisa memicu file input yang
+// tersembunyi (dialog pilih-foto tidak terbuka / tidak konsisten), atau
+// (b) foto BERHASIL tersimpan ke data tapi galeri yang admin LIHAT tidak
+// ter-update, sehingga admin mengira upload gagal & tidak jadi menekan Simpan.
+// Sekarang tiap ID disertai KONTEKS modal ('ord' utk Kelola, 'inv' utk
+// Invoice) supaya tidak pernah bentrok, dan pembaruan galeri menyasar
+// SEMUA konteks yang ada (bukan cuma satu) — jadi kedua modal (kalau
+// kebetulan sama-sama pernah dirender) selalu tampil sinkron dgn data asli.
+function scaleGalleryInnerHTML(orderId, idx, photos, ctx){
+  ctx=ctx||'ord';
+  const input=`<input type="file" accept="image/*" id="scale-photo-input-${ctx}-${idx}" style="display:none" onchange="handleScalePhotoPick(this,'${orderId}',${idx},'${ctx}')">`;
   if(!photos.length){
-    return `<button type="button" class="btn btn-block" onclick="pickScalePhoto('${orderId}',${idx})" style="background:transparent;border:1px dashed rgba(74,159,212,.4);color:#4A9FD4;padding:8px;font-size:11px">📸 Ambil Foto Timbangan (bukti berat aktual, bisa lebih dari 1)</button>${input}`;
+    return `<button type="button" class="btn btn-block" onclick="pickScalePhoto('${orderId}',${idx},'${ctx}')" style="background:transparent;border:1px dashed rgba(74,159,212,.4);color:#4A9FD4;padding:8px;font-size:11px">📸 Ambil Foto Timbangan (bukti berat aktual, bisa lebih dari 1)</button>${input}`;
   }
-  const thumbs=photos.map((url,pi)=>`<div style="position:relative"><img src="${url}" onclick="viewScalePhoto('${orderId}',${idx},${pi})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;cursor:pointer"><button type="button" onclick="removeScalePhotoAt('${orderId}',${idx},${pi})" style="position:absolute;top:2px;right:2px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:5px;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">×</button></div>`).join('');
+  const thumbs=photos.map((url,pi)=>`<div style="position:relative"><img src="${url}" onclick="viewScalePhoto('${orderId}',${idx},${pi})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;cursor:pointer"><button type="button" onclick="removeScalePhotoAt('${orderId}',${idx},${pi},'${ctx}')" style="position:absolute;top:2px;right:2px;background:rgba(212,80,74,.9);color:#fff;border:none;border-radius:5px;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">×</button></div>`).join('');
   return `<div style="background:rgba(74,159,212,.08);border:1px solid rgba(74,159,212,.25);border-radius:9px;padding:8px">
     <div style="font-size:10px;font-weight:700;color:#4A9FD4;margin-bottom:6px">⚖️📷 Foto Timbangan (${photos.length})</div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:6px">${thumbs}</div>
-    <button type="button" onclick="pickScalePhoto('${orderId}',${idx})" style="width:100%;background:rgba(212,160,23,.12);border:1px dashed rgba(212,160,23,.4);color:#D4A017;border-radius:6px;padding:6px;font-size:10px;font-weight:700;cursor:pointer">+ Tambah Foto</button>
+    <button type="button" onclick="pickScalePhoto('${orderId}',${idx},'${ctx}')" style="width:100%;background:rgba(212,160,23,.12);border:1px dashed rgba(212,160,23,.4);color:#D4A017;border-radius:6px;padding:6px;font-size:10px;font-weight:700;cursor:pointer">+ Tambah Foto</button>
     ${input}
   </div>`;
 }
-// KOREKSI: sebelumnya menambah 1 foto memicu render ULANG SELURUH modal
-// (Kelola/Invoice) lewat _refreshItemPhotoModal — berisiko: kalau admin
-// sedang mengetik di field LAIN yang belum disimpan, nilai itu ikut ter-reset
-// tiap kali galeri foto diperbarui. Sekarang dibungkus wrapper ber-ID stabil
-// supaya update galeri bisa DITARGETKAN ke wrapper itu saja, TANPA menyentuh
-// bagian modal lainnya — sama seperti pola aman yang sudah dipakai galeri
-// bukti TF (pay-proof-wrap).
-function scaleGalleryHTML(orderId, idx, photos){
-  return `<div id="scale-gallery-wrap-${idx}">${scaleGalleryInnerHTML(orderId, idx, photos)}</div>`;
+function scaleGalleryHTML(orderId, idx, photos, ctx){
+  ctx=ctx||'ord';
+  return `<div id="scale-gallery-wrap-${ctx}-${idx}">${scaleGalleryInnerHTML(orderId, idx, photos, ctx)}</div>`;
 }
 // Refresh modal yg SEDANG TERBUKA (bisa Kelola atau Invoice) supaya galeri
 // foto langsung terlihat update, dari layar manapun aksi ini dipicu.
@@ -6700,11 +6710,25 @@ function _refreshItemPhotoModal(orderId){
   if(invModal && invModal.classList.contains('open')){ openInvoiceModal(orderId); return; }
   openOrderModal(orderId);
 }
-function pickScalePhoto(orderId, idx){
-  const inp=document.getElementById('scale-photo-input-'+idx);
+function pickScalePhoto(orderId, idx, ctx){
+  ctx=ctx||'ord';
+  const inp=document.getElementById('scale-photo-input-'+ctx+'-'+idx);
   if(inp) inp.click();
 }
-async function handleScalePhotoPick(input, orderId, idx){
+// Perbarui wrapper galeri di SEMUA konteks yang mungkin ada di DOM ('ord' &
+// 'inv' sekaligus) — bukan cuma konteks tempat aksi dipicu. Ini yang
+// menutup celah "ID ganda": walau salah satu wrap kebetulan tersembunyi,
+// KEDUANYA tetap diperbarui, jadi modal manapun yang admin lihat selalu
+// menampilkan data terbaru.
+function _refreshAllScaleWraps(orderId, idx, photos){
+  let adaWrap=false;
+  ['ord','inv'].forEach(c=>{
+    const w=document.getElementById('scale-gallery-wrap-'+c+'-'+idx);
+    if(w){ adaWrap=true; w.innerHTML=scaleGalleryInnerHTML(orderId, idx, photos, c); }
+  });
+  return adaWrap;
+}
+async function handleScalePhotoPick(input, orderId, idx, ctx){
   const file=input.files && input.files[0]; if(!file){ return; }
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o){ input.value=''; return; }
   const it=(o.items||[])[idx]; if(!it){ input.value=''; return; }
@@ -6713,17 +6737,16 @@ async function handleScalePhotoPick(input, orderId, idx){
     const compressed=await compressImg(file);
     it.scalePhotos=[...scalePhotosOf(it), compressed];
     it.scalePhoto=it.scalePhotos[0]; // alias foto pertama, utk kompatibilitas cek lama (!it.scalePhoto)
-    // UPDATE DITARGETKAN: hanya wrapper galeri milik item ini, TIDAK
-    // membangun ulang seluruh modal (menghindari reset field lain yg
-    // sedang diketik admin tapi belum disimpan).
-    const wrap=document.getElementById('scale-gallery-wrap-'+idx);
-    if(wrap) wrap.innerHTML=scaleGalleryInnerHTML(orderId, idx, it.scalePhotos);
-    else _refreshItemPhotoModal(orderId); // fallback kalau wrapper tak ditemukan
+    // UPDATE DITARGETKAN: hanya wrapper galeri milik item ini (di SEMUA
+    // konteks modal yang ada), TIDAK membangun ulang seluruh modal
+    // (menghindari reset field lain yg sedang diketik admin tapi belum disimpan).
+    const adaWrap=_refreshAllScaleWraps(orderId, idx, it.scalePhotos);
+    if(!adaWrap) _refreshItemPhotoModal(orderId); // fallback kalau wrapper tak ditemukan
     toast('📸 Foto timbangan ditambahkan ('+it.scalePhotos.length+') — klik "Simpan" untuk menyimpan ke server','ok');
   }catch(e){ toast('Gagal memproses foto: '+e.message,'err'); }
   input.value='';
 }
-function removeScalePhotoAt(orderId, idx, photoIdx){
+function removeScalePhotoAt(orderId, idx, photoIdx, ctx){
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
   const it=(o.items||[])[idx]; if(!it) return;
   if(!confirm('Hapus foto timbangan ini?')) return;
@@ -6731,9 +6754,8 @@ function removeScalePhotoAt(orderId, idx, photoIdx){
   it.scalePhotos=photos;
   it.scalePhoto=photos[0]||null;
   if(!photos.length) delete it.scalePhoto;
-  const wrap=document.getElementById('scale-gallery-wrap-'+idx);
-  if(wrap) wrap.innerHTML=scaleGalleryInnerHTML(orderId, idx, photos);
-  else _refreshItemPhotoModal(orderId);
+  const adaWrap=_refreshAllScaleWraps(orderId, idx, photos);
+  if(!adaWrap) _refreshItemPhotoModal(orderId);
   toast('Foto timbangan dihapus — klik "Simpan" untuk menyimpan perubahan','err');
 }
 function viewScalePhoto(orderId, idx, photoIdx){
