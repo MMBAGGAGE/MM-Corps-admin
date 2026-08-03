@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v49 · perbaiki foto timbangan tidak tersimpan (ID ganda Kelola/Invoice) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v51 · anti data-kembali & kunci sesi otomatis · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -773,7 +773,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
          & terjangkau tanpa perlu scroll penuh sampai akhir. -->
     <div style="position:sticky;bottom:-40px;background:var(--dark2);padding:10px 0 0;margin:8px -19px -40px;padding-left:19px;padding-right:19px;padding-bottom:16px;box-shadow:0 -8px 16px -8px rgba(0,0,0,.4)">
       <button class="btn btn-gold btn-block" onclick="saveInvoice()">💾 Simpan & Kirim ke Customer via WA</button>
-      <button class="btn btn-ghost btn-block" onclick="closeModal('modal-invoice')">Batal</button>
+      <button class="btn btn-ghost btn-block" onclick="batalEditInvoice()">Batal</button>
     </div>
   </div>
 </div>
@@ -893,14 +893,130 @@ try{
   });
 }catch(e){}
 const auth = firebase.auth();
+// ══════════════════════════════════════════════════
+// 🔐 KEBIJAKAN SESI (KOREKSI CELAH KEAMANAN)
+// Sebelumnya sesi login TIDAK PERNAH kedaluwarsa: sekali admin login, app
+// terbuka penuh selamanya tanpa pernah meminta password lagi. Kalau HP hilang,
+// dipinjam, atau diakses orang lain, seluruh data order, keuangan, dan nomor
+// customer langsung terbuka tanpa hambatan apa pun. Sekarang:
+//   • Menganggur (idle) > 30 menit  → sesi dikunci, wajib password lagi
+//   • Umur sesi > 12 jam            → sesi dikunci, wajib password lagi
+// Aktivitas dicatat di localStorage supaya tetap berlaku walau app ditutup
+// lalu dibuka lagi (bukan cuma selama tab terbuka).
+// ══════════════════════════════════════════════════
+const SESI_IDLE_MAX = 30*60*1000;   // 30 menit menganggur
+const SESI_UMUR_MAX = 12*60*60*1000; // 12 jam total
+function _sesiSet(k,v){ try{ localStorage.setItem(k,String(v)); }catch(e){} }
+function _sesiGet(k){ try{ return parseInt(localStorage.getItem(k)||'0',10)||0; }catch(e){ return 0; } }
+function sesiMulaiBaru(){ const t=Date.now(); _sesiSet('mmb_sesi_mulai',t); _sesiSet('mmb_sesi_aktif',t); }
+function sesiCatatAktivitas(){ _sesiSet('mmb_sesi_aktif',Date.now()); }
+// Mengembalikan alasan kadaluwarsa (string) atau '' kalau sesi masih sah.
+function sesiKadaluwarsa(){
+  const mulai=_sesiGet('mmb_sesi_mulai'), aktif=_sesiGet('mmb_sesi_aktif');
+  if(!mulai||!aktif) return 'baru';         // tidak ada jejak sesi → perlakukan sbg sesi baru
+  const now=Date.now();
+  if(now-aktif>SESI_IDLE_MAX) return 'idle';
+  if(now-mulai>SESI_UMUR_MAX) return 'umur';
+  return '';
+}
+function kunciSesi(alasan){
+  try{ sessionStorage.setItem('mmb_lock_reason',alasan||''); }catch(e){}
+  try{ localStorage.removeItem('mmb_sesi_mulai'); localStorage.removeItem('mmb_sesi_aktif'); }catch(e){}
+  try{ auth.signOut(); }catch(e){}
+}
+function pesanKunci(){
+  let r=''; try{ r=sessionStorage.getItem('mmb_lock_reason')||''; }catch(e){}
+  try{ sessionStorage.removeItem('mmb_lock_reason'); }catch(e){}
+  if(r==='idle') return '🔒 Sesi dikunci otomatis karena tidak ada aktivitas 30 menit. Masukkan password lagi.';
+  if(r==='umur') return '🔒 Sesi sudah 12 jam. Demi keamanan, masuk lagi dengan password.';
+  if(r==='manual') return '✅ Kamu sudah keluar. Masuk lagi untuk melanjutkan.';
+  return '';
+}
+// Catat aktivitas admin (dibatasi 1x/30 detik supaya tidak boros tulis).
+let _aktivitasTerakhirTulis=0;
+['click','keydown','touchstart','scroll'].forEach(function(ev){
+  try{
+    document.addEventListener(ev,function(){
+      const n=Date.now();
+      if(n-_aktivitasTerakhirTulis<30000) return;
+      _aktivitasTerakhirTulis=n;
+      if(auth.currentUser) sesiCatatAktivitas();
+    },{passive:true});
+  }catch(e){}
+});
+// Periksa berkala + saat app kembali ke depan (mis. HP dibuka lagi).
+function periksaSesiBerkala(){
+  if(!auth.currentUser) return;
+  const alasan=sesiKadaluwarsa();
+  if(alasan && alasan!=='baru') kunciSesi(alasan);
+}
+try{ setInterval(periksaSesiBerkala, 60000); }catch(e){}
+try{ document.addEventListener('visibilitychange',function(){ if(!document.hidden) periksaSesiBerkala(); }); }catch(e){}
 // Simpan sesi login secara LOKAL: admin yang sudah pernah login TIDAK perlu
-// login lagi saat buka app berikutnya — langsung masuk tanpa ronde jaringan.
+// login lagi saat buka app berikutnya — TAPI hanya selama sesi belum
+// kedaluwarsa menurut kebijakan di atas.
 try{ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
 // Prefill email terakhir supaya tidak perlu ketik ulang.
 try{ var _le=localStorage.getItem('mmb_last_email'); if(_le){ var _em=document.getElementById('l-email'); if(_em) _em.value=_le; } }catch(e){}
 
 // ── HELPERS ───────────────────────────────────
+// Menghapus DUPLIKASI foto sebelum dikirim ke server: `it.scalePhoto` adalah
+// alias kompatibilitas lama yang menyimpan SALINAN PENUH foto pertama —
+// begitu `it.scalePhotos` (array) sudah ada, alias itu jadi mubazir dan
+// MELIPATGANDAKAN ukuran dokumen (1 foto 650KB tersimpan 2× = ~1,3MB efektif,
+// sudah lebih dari batas 1MB Firestore SENDIRIAN). Cache lokal (o.items) TIDAK
+// disentuh — alias tetap ada di memori untuk kompatibilitas; ini HANYA
+// membersihkan apa yang benar-benar DIKIRIM ke server.
+function stripFotoDuplikatUtkSimpan(items){
+  return (items||[]).map(it=>{
+    if(Array.isArray(it.scalePhotos) && it.scalePhotos.length && it.scalePhoto){
+      const {scalePhoto, ...tanpaAlias}=it;
+      return tanpaAlias;
+    }
+    return it;
+  });
+}
 const fmtRp   = n => 'Rp ' + Number(n||0).toLocaleString('id-ID');
+// ══════════════════════════════════════════════════
+// 🛡️ PENJAGA UKURAN DOKUMEN FIRESTORE (batas keras 1.048.576 byte/dokumen)
+// KOREKSI BUG SERIUS ("data hilang setelah disimpan"): dokumen order bisa
+// membawa BANYAK foto base64 sekaligus — foto timbangan (bisa >1), bukti TF,
+// foto contoh barang customer, foto tanda tujuan jastip. Tiap foto dikompres
+// sampai ~650KB (supaya tetap jelas dibaca), tapi itu target PER FOTO, bukan
+// per DOKUMEN — begitu ada 2 foto saja dalam satu order, totalnya SUDAH
+// melebihi 1MB. Saat itu terjadi, penulisan ke Firestore DITOLAK SERVER dan
+// melempar error, TERTANGKAP oleh .catch() — tapi modal SUDAH TERTUTUP dan
+// toast "berhasil disimpan" SUDAH TERLANJUR TAMPIL (pembaruan optimistik),
+// jadi admin mengira semua tersimpan. Baru ketika snapshot berikutnya datang
+// dari server (yang TIDAK PERNAH benar-benar menerima perubahan itu), cache
+// lokal ditimpa data lama — persis terasa seperti "yang sudah diupdate hilang".
+// Sekarang ukuran ditaksir SEBELUM mengirim, dan penyimpanan DIBLOKIR dengan
+// pesan jelas & tidak bisa terlewat (alert, bukan toast yang cepat hilang)
+// kalau berisiko melebihi batas — supaya admin tahu SAAT ITU JUGA, sambil
+// modal masih terbuka dan foto masih bisa dihapus, bukan belakangan setelah
+// datanya sudah hilang tanpa jejak.
+const FIRESTORE_DOC_LIMIT = 1048576;
+const FIRESTORE_SAFE_LIMIT = 900000; // beri margin ± 150KB utk field lain di dokumen
+function estimatePayloadBytes(obj){
+  try{ return new Blob([JSON.stringify(obj)]).size; }
+  catch(e){ try{ return JSON.stringify(obj).length; }catch(e2){ return 0; } }
+}
+// Mengembalikan pesan peringatan (string) kalau TERLALU BESAR, atau '' kalau aman.
+function cekUkuranDokumenOrder(o, itemsBaru){
+  const size=estimatePayloadBytes({items:itemsBaru, invoiceItems:o.invoiceItems||[]});
+  if(size<FIRESTORE_SAFE_LIMIT) return '';
+  // Hitung rincian supaya admin tahu PERSIS apa yang harus dihapus.
+  const rincian=[];
+  (itemsBaru||[]).forEach((it,i)=>{
+    const nScale=(Array.isArray(it.scalePhotos)?it.scalePhotos.length:(it.scalePhoto?1:0));
+    if(nScale>1) rincian.push(`Barang #${i+1} (${catDisplayName(it)}): ${nScale} foto timbangan`);
+    if(it.dest&&it.dest.photo) rincian.push(`Barang #${i+1} (${catDisplayName(it)}): 1 foto tanda tujuan`);
+  });
+  return '⚠️ DATA TIDAK BISA DISIMPAN — total foto pada order ini ('+(Math.round(size/1024))+' KB) melebihi batas server ('+(Math.round(FIRESTORE_SAFE_LIMIT/1024))+' KB).\n\n'
+    +'Kalau dipaksa simpan, server AKAN MENOLAK dan perubahan ini bisa hilang tanpa peringatan lain.\n\n'
+    +(rincian.length?'Kemungkinan penyebab:\n• '+rincian.join('\n• ')+'\n\n':'')
+    +'Hapus dulu foto yang buram/duplikat/tidak perlu (❌ pada tiap foto), baru simpan lagi.';
+}
 const fmtDate = s => { try{ if(!s) return '-'; var d=new Date(s.indexOf('T')>=0? s : (s+'T00:00:00')); return isNaN(d.getTime())? (s||'-') : d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'}); }catch(e){return s||'-'} };
 function toast(msg,type='ok'){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type+' show';setTimeout(()=>{t.className='toast'},2800)}
 
@@ -1058,7 +1174,10 @@ function closeModal(id){
 document.querySelectorAll('.modal-overlay').forEach(el=>el.addEventListener('click',e=>{if(e.target===el)closeModal(el.id)}));
 
 // ── STATE ─────────────────────────────────────
-let currentRole='owner', currentUid='';
+// Nilai AWAL sengaja hak paling rendah ('kurir'), bukan 'owner'. Naik hanya
+// setelah verifyRole() benar-benar membaca peran dari server — supaya tidak
+// ada celah di mana pengguna sempat memegang akses penuh sebelum diverifikasi.
+let currentRole='kurir', currentUid='';
 let cachedOrders=[], cachedTrips=[], cachedSettings={};
 let activeFilter='all', editTripId=null, editOrderId=null;
 let kurirFiles=[];
@@ -1094,16 +1213,26 @@ function getDefaultSettings(){
 // ── AUTH ──────────────────────────────────────
 auth.onAuthStateChanged(async user=>{
   if(user){
+    // ── GERBANG SESI: sesi yang sudah kedaluwarsa TIDAK boleh langsung masuk,
+    // walaupun Firebase masih menyimpan kredensialnya secara lokal.
+    const alasanKadaluwarsa=sesiKadaluwarsa();
+    if(alasanKadaluwarsa && alasanKadaluwarsa!=='baru'){ kunciSesi(alasanKadaluwarsa); return; }
+    if(alasanKadaluwarsa==='baru') sesiMulaiBaru(); // sesi lama tak berjejak → mulai hitung dari sekarang
+    sesiCatatAktivitas();
     currentUid=user.uid;
     try{ clearTimeout(window._loginSlow); }catch(e){}
-    // ── POIN 1: LOGIN CEPAT ──────────────────────────────────
+    // ── LOGIN CEPAT ──────────────────────────────────────────
     // Tampilkan app SEGERA memakai role terakhir (cache). Verifikasi role
-    // dilakukan di latar belakang tanpa memblokir UI. Ini AMAN karena
-    // keamanan data yang sebenarnya dijaga oleh Firestore Rules di server —
-    // role di sisi client hanya menentukan tab mana yang tampil, bukan akses data.
+    // dilakukan di latar belakang tanpa memblokir UI.
+    // KOREKSI CELAH KEAMANAN: dulu barisnya `cachedRole||'owner'` — artinya
+    // kalau cache kosong (perangkat baru, localStorage dibersihkan, atau
+    // dokumen users/<uid> gagal dibaca), pengguna LANGSUNG dianggap OWNER
+    // dengan akses penuh ke keuangan & seluruh data. Sekarang memakai
+    // prinsip hak paling rendah: default 'kurir', dan naik HANYA setelah
+    // verifyRole() benar-benar membaca perannya dari server.
     var cachedRole=''; try{ cachedRole=localStorage.getItem('mmb_role_'+user.uid)||''; }catch(e){}
     try{ window._userDocCol=localStorage.getItem('mmb_rolecol_'+user.uid)||''; }catch(e){}
-    currentRole=cachedRole||'owner';
+    currentRole=cachedRole||'kurir';
     window._userDocAda=!!cachedRole;
     document.getElementById('login').style.display='none';
     document.getElementById('app').style.display='flex';
@@ -1120,6 +1249,12 @@ auth.onAuthStateChanged(async user=>{
   }else{
     document.getElementById('login').style.display='flex';
     document.getElementById('app').style.display='none';
+    // Beri tahu ALASAN kenapa harus login lagi, supaya admin tidak bingung
+    // mengira app-nya rusak saat sesi terkunci otomatis.
+    try{
+      var pk=pesanKunci();
+      if(pk){ var em=document.getElementById('err-msg'); if(em){ em.style.color='#D4A017'; em.textContent=pk; } }
+    }catch(e){}
   }
 });
 // Verifikasi role di latar belakang; perbarui tab bila berbeda dari cache.
@@ -1157,7 +1292,9 @@ function doLogin(){
   // Kalau lebih dari 3 detik belum masuk, beri tahu (biasanya sinyal lemah).
   clearTimeout(window._loginSlow);
   window._loginSlow=setTimeout(function(){ if(btn.disabled){ errEl.style.color='#D4A017'; errEl.textContent='Koneksi lambat, masih memproses...'; } },3000);
-  auth.signInWithEmailAndPassword(email,pass).catch(e=>{
+  auth.signInWithEmailAndPassword(email,pass).then(function(){
+    sesiMulaiBaru(); // hitungan idle & umur sesi dimulai dari login ini
+  }).catch(e=>{
     clearTimeout(window._loginSlow);
     let msg='Login gagal';
     if(['auth/wrong-password','auth/invalid-credential','auth/invalid-login-credentials'].includes(e.code)) msg='Email atau password salah';
@@ -1169,7 +1306,12 @@ function doLogin(){
   });
 }
 document.getElementById('l-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
-function doLogout(){auth.signOut();}
+function doLogout(){
+  // Bersihkan jejak sesi supaya perangkat ini benar-benar butuh password lagi.
+  try{ sessionStorage.setItem('mmb_lock_reason','manual'); }catch(e){}
+  try{ localStorage.removeItem('mmb_sesi_mulai'); localStorage.removeItem('mmb_sesi_aktif'); }catch(e){}
+  auth.signOut();
+}
 
 // ── NAV ───────────────────────────────────────
 function buildTabs(){
@@ -1686,29 +1828,81 @@ async function saveDropPoints(){
 }
 
 // ── LOAD DATA ─────────────────────────────────
+// ══════════════════════════════════════════════════
+// 📝 PELACAK PERUBAHAN BELUM TERSIMPAN (anti "data kembali lagi")
+// KOREKSI BUG SERIUS: penjaga versi lama menebak niat admin dari JUMLAH foto —
+// "kalau lokal punya LEBIH BANYAK foto drpd server, pertahankan lokal".
+// Penjaga itu ASIMETRIS dan justru merusak saat admin MENGHAPUS:
+//   • admin hapus foto  → lokal jadi LEBIH SEDIKIT
+//   • snapshot server masuk (dipicu tulisan APA PUN di koleksi orders)
+//   • karena lokal TIDAK lebih banyak, penjaga diam → data server (yang masih
+//     membawa foto lama) MENIMPA balik cache lokal
+//   • foto yang sudah dihapus MUNCUL LAGI; kalau admin lalu klik "Simpan",
+//     yang tersimpan justru data lama itu → penghapusan hilang tanpa jejak.
+// Sama persis penyebabnya untuk "sudah disimpan tapi kembali seperti semula".
+// Sekarang tidak menebak lagi: order yang sedang punya perubahan BELUM
+// TERSIMPAN ditandai eksplisit, dan selama tanda itu ada, snapshot TIDAK BOLEH
+// menimpa item-nya — baik penambahan MAUPUN penghapusan sama-sama aman.
+const _localPendingEdits={};
+const PENDING_EDIT_TTL=15*60*1000; // pengaman: tanda kedaluwarsa 15 menit
+function markOrderDirty(orderId){
+  if(!orderId) return;
+  _localPendingEdits[orderId]={ts:Date.now()};
+}
+function clearOrderDirty(orderId){
+  if(!orderId) return;
+  delete _localPendingEdits[orderId];
+}
+function isOrderDirty(orderId){
+  const d=_localPendingEdits[orderId];
+  if(!d) return false;
+  // Jangan biarkan tanda menggantung selamanya (mis. admin tinggal pergi
+  // tanpa simpan/batal) — kalau kedaluwarsa, biarkan server jadi acuan lagi.
+  if(Date.now()-d.ts>PENDING_EDIT_TTL){ delete _localPendingEdits[orderId]; return false; }
+  return true;
+}
+// Batal / tutup tanpa simpan → buang tanda DAN ambil ulang data asli dari
+// server, supaya layar tidak menyisakan perubahan yang tidak jadi disimpan.
+function discardOrderEdits(orderId){
+  if(!orderId) return;
+  clearOrderDirty(orderId);
+  try{
+    db.collection('orders').doc(orderId).get().then(function(snap){
+      if(!snap.exists) return;
+      const fresh={id:snap.id,...snap.data()};
+      const i=(cachedOrders||[]).findIndex(x=>x.id===orderId);
+      if(i>=0) cachedOrders[i]=fresh;
+      if(typeof filterOrders==='function'){
+        const active=(document.querySelector('.page.active')||{}).id||'';
+        if(active==='page-orders') filterOrders();
+      }
+    }).catch(function(){});
+  }catch(e){}
+}
+// Batal di Invoice: buang perubahan yang belum tersimpan, lalu ambil ulang
+// data asli dari server supaya layar tidak menyisakan perubahan batal.
+function batalEditInvoice(){
+  const id=editOrderId;
+  closeModal('modal-invoice');
+  if(id) discardOrderEdits(id);
+}
 function loadData(){
   // Real-time listener untuk orders
   db.collection('orders').orderBy('createdAt','desc').onSnapshot(snap=>{
     // JARING PENGAMAN: snapshot Firestore bisa datang KAPAN SAJA (dipicu
     // penulisan APA PUN di koleksi orders, dari device/proses manapun) —
-    // termasuk PERSIS saat admin sedang menambah beberapa foto timbangan
-    // sekaligus tapi BELUM sempat klik "Simpan". Sebelumnya cachedOrders
-    // diganti TOTAL dgn objek baru dari server, sehingga foto yang baru
-    // ditambahkan LOKAL (belum tersimpan) ikut hilang tanpa jejak. Sekarang:
-    // kalau versi LOKAL (belum tersimpan) punya LEBIH BANYAK foto timbangan
-    // drpd versi server yg baru datang, pertahankan foto lokal itu.
+    // termasuk PERSIS saat admin sedang menambah/menghapus foto tapi BELUM
+    // sempat klik "Simpan". Order yang ditandai "belum tersimpan" dipertahankan
+    // versi LOKALNYA secara UTUH; sisanya diperbarui normal dari server.
     const prevById={}; (cachedOrders||[]).forEach(o=>{ prevById[o.id]=o; });
     cachedOrders=snap.docs.map(d=>{
       const fresh={id:d.id,...d.data()};
       const prev=prevById[fresh.id];
-      if(prev && Array.isArray(prev.items) && Array.isArray(fresh.items) && prev.items.length===fresh.items.length){
-        fresh.items=fresh.items.map((freshIt,i)=>{
-          const prevIt=prev.items[i]; if(!prevIt) return freshIt;
-          const prevPhotos=(Array.isArray(prevIt.scalePhotos)&&prevIt.scalePhotos.length)?prevIt.scalePhotos:(prevIt.scalePhoto?[prevIt.scalePhoto]:[]);
-          const freshPhotos=(Array.isArray(freshIt.scalePhotos)&&freshIt.scalePhotos.length)?freshIt.scalePhotos:(freshIt.scalePhoto?[freshIt.scalePhoto]:[]);
-          if(prevPhotos.length>freshPhotos.length) return {...freshIt, scalePhotos:prevPhotos, scalePhoto:prevPhotos[0]};
-          return freshIt;
-        });
+      if(prev && isOrderDirty(fresh.id)){
+        // Ada perubahan lokal yang belum tersimpan → JANGAN ditimpa.
+        // Field non-item tetap ikut server (mis. status dari admin lain),
+        // tapi items (foto & barang) memakai versi lokal admin.
+        return {...fresh, items:prev.items, invoiceItems:prev.invoiceItems||fresh.invoiceItems};
       }
       return fresh;
     });
@@ -2568,10 +2762,11 @@ function commitAddInvoiceItem(orderId){
   items.push({cat:cat?cat.label:catKey, catKey, type:(cat&&cat.type)||'kg', qty, rate, actQty:qty, actRate:rate, desc:'', status:'approved', adminByAdmin:true, adminNote:'Ditambahkan admin saat Invoice (aktualisasi)'});
   o.items=items;
   recalcTotalFinal(o);
+  markOrderDirty(orderId); // lindungi jeda sampai server konfirmasi
   document.getElementById('add-invoice-item-picker').innerHTML='';
   openInvoiceModal(orderId); // re-render supaya barang baru langsung terlihat
   toast('✅ Barang baru ditambahkan ke Invoice','ok');
-  db.collection('orders').doc(orderId).update({items, totalFinal:o.totalFinal, totalFinalOverride:false}).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  db.collection('orders').doc(orderId).update({items, totalFinal:o.totalFinal, totalFinalOverride:false}).then(function(){ clearOrderDirty(orderId); }).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
 }
 function addAdminItem(orderId){
   if(!guard('additem-'+orderId,600)) return;
@@ -2579,7 +2774,9 @@ function addAdminItem(orderId){
   const items=[...(o.items||[])];
   items.push({cat:'Tambahan Admin',type:'kg',qty:1,rate:0,actQty:1,actRate:0,desc:'',status:'approved',adminPriced:true,adminByAdmin:true,adminNote:'Ditambahkan admin saat handling'});
   o.items=items;
+  markOrderDirty(orderId);
   db.collection('orders').doc(orderId).update({items}).then(function(){
+    clearOrderDirty(orderId);
     openOrderModal(orderId); // re-render modal supaya field baru muncul
     toast('Barang baru ditambahkan — isi detail lalu Simpan','ok');
     refreshCapacityUI(o.tripId);
@@ -2643,6 +2840,14 @@ async function saveOrder(id){
   const history=[...(o.history||[])];
   if(newSt!==o.status)history.push({status:newSt,ts:Date.now(),note:document.getElementById('m-note')?.value||''});
   const cukai=parseFloat(document.getElementById('m-cukai')?.value)||0;
+  // ── PENJAGA UKURAN DOKUMEN — diperiksa SEBELUM modal ditutup & pembaruan
+  // optimistik, supaya kalau ditolak, admin masih di modal & foto masih
+  // bisa dihapus, bukan baru sadar setelah "Simpan" terasa berhasil.
+  // Dicek pada versi yg SUDAH dipangkas duplikatnya — itulah ukuran yang
+  // SEBENARNYA akan dikirim ke server.
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(items);
+  const pesanTerlaluBesar=cekUkuranDokumenOrder(o, itemsUtkSimpan);
+  if(pesanTerlaluBesar){ alert(pesanTerlaluBesar); return; }
   // ── STATUS PENGAMBILAN BARANG — dgn jejak akuntabilitas (siapa & kapan) ──
   // Hanya distempel ULANG saat statusnya benar-benar BERUBAH, supaya tanggal
   // konfirmasi tidak ikut bergeser tiap kali admin sekadar membuka & simpan
@@ -2674,7 +2879,12 @@ async function saveOrder(id){
   toast('Order diupdate! ✅'+(completePayload?' · Order otomatis Selesai ✅':'')+(_slot?(' · '+_slot):''),'ok');
   const active=document.querySelector('.page.active')?.id||'';
   if(active==='page-orders') filterOrders();
-  db.collection('orders').doc(id).update(payload).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  // Ke SERVER kirim versi TERPANGKAS (tanpa duplikat alias foto); cache lokal
+  // (o.items, sudah di-assign di atas) tetap memakai versi lengkap agar
+  // perilaku dalam-memori tidak berubah sama sekali.
+  db.collection('orders').doc(id).update({...payload, items:itemsUtkSimpan})
+    .then(function(){ clearOrderDirty(id); })  // sudah aman di server → snapshot boleh jadi acuan lagi
+    .catch(function(e){ markOrderDirty(id); toast('❌ GAGAL SIMPAN: '+e.message+' — perubahan masih tersimpan di layar, coba simpan lagi','err'); });
 }
 
 async function approveOrder(id){
@@ -2979,6 +3189,14 @@ async function saveInvoice(){
   // AUDIT ANTI-KORUPSI: revenue auto dihitung dari item aktual yang baru disimpan
   const autoRev=newItems.filter(it=>it.status==='approved').reduce((s,it)=>s+((it.actQty!=null?it.actQty:it.qty)||0)*((it.actRate!=null?it.actRate:it.rate)||0),0);
   const isOverride=Math.abs(total-cukai-autoRev)>1;
+  // ── PENJAGA UKURAN DOKUMEN — DIPERIKSA SEBELUM modal ditutup & pembaruan
+  // optimistik terjadi, supaya kalau ditolak, admin MASIH BERADA di modal
+  // dan foto MASIH BISA dihapus, bukan baru sadar setelah semuanya hilang.
+  // Dicek pada versi yg SUDAH dipangkas duplikatnya — itulah ukuran yang
+  // SEBENARNYA akan dikirim ke server.
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(newItems);
+  const pesanTerlaluBesar=cekUkuranDokumenOrder(o, itemsUtkSimpan);
+  if(pesanTerlaluBesar){ alert(pesanTerlaluBesar); return; }
   // KOREKSI: Invoice diterbitkan TIDAK LAGI otomatis menandai order "Selesai".
   // Order baru jadi Selesai lewat checkAndMarkComplete() — HANYA saat barang
   // sudah diambil DAN pembayaran sudah lunas (lihat fungsi checkAndMarkComplete).
@@ -2987,8 +3205,10 @@ async function saveInvoice(){
   closeModal('modal-invoice');
   toast('Invoice disimpan! 🧾','ok');
   refreshCapacityUI(o.tripId);
+  // Ke SERVER kirim versi TERPANGKAS (tanpa duplikat alias foto); cache lokal
+  // (o.items di atas) tetap memakai versi lengkap.
   db.collection('orders').doc(o.id).update({
-    items:newItems,
+    items:itemsUtkSimpan,
     invoiceItems:invItems,
     cukaiAmount:cukai,totalFinal:total,
     totalFinalOverride:isOverride,
@@ -2997,7 +3217,8 @@ async function saveInvoice(){
     revenueOverrideAt:isOverride?Date.now():null,
     invoiceDate:new Date().toISOString().slice(0,10),
     invoiceNote:document.getElementById('iv-note')?.value||'',
-  }).catch(function(e){ toast('Gagal simpan invoice: '+e.message,'err'); });
+  }).then(function(){ clearOrderDirty(o.id); })  // aman di server → snapshot boleh jadi acuan lagi
+    .catch(function(e){ markOrderDirty(o.id); toast('❌ GAGAL SIMPAN INVOICE: '+e.message+' — perubahan masih di layar, coba simpan lagi','err'); });
   const lines=invItems.map(it=>`• ${it.cat} (${it.qty} ${it.type}): ${fmtRp(it.qty*it.rate)}`).join('\n');
   // ── INVOICE PENAGIHAN — dokumen TAGIHAN, bukan bukti lunas ──
   // Sengaja TIDAK pernah mengklaim "sudah lunas" atau "Selesai" di sini.
@@ -5246,7 +5467,12 @@ function runAudit(period){
       if(it.status!=='approved') return;
       const declared=it.qty||0;
       const actual=it.actQty!=null?it.actQty:it.qty;
-      if(declared>0 && Math.abs(actual-declared)/declared>=0.15 && !it.scalePhoto)
+      // KOREKSI: dulu baca it.scalePhoto langsung — kalau alias itu tidak
+      // ikut disimpan ke server (utk hemat ukuran dokumen, lihat catatan di
+      // cekUkuranDokumenOrder), pengecekan ini SALAH mengira "tidak ada foto"
+      // padahal fotonya ada di scalePhotos. Sekarang selalu pakai
+      // scalePhotosOf() yang menghormati array DAN alias lama sekaligus.
+      if(declared>0 && Math.abs(actual-declared)/declared>=0.15 && scalePhotosOf(it).length===0)
         flags.push({id:'I-'+o.id+'-'+it.cat, sev:'low', cat:'Selisih berat tanpa bukti foto', msg:`Order ${o.code||o.id}: "${catDisplayName(it)}" berat aktual (${actual}${it.type||'kg'}) beda cukup jauh dari deklarasi customer (${declared}${it.type||'kg'}) tanpa foto timbangan sebagai bukti.`});
     });
   });
@@ -6736,13 +6962,23 @@ async function handleScalePhotoPick(input, orderId, idx, ctx){
   try{
     const compressed=await compressImg(file);
     it.scalePhotos=[...scalePhotosOf(it), compressed];
-    it.scalePhoto=it.scalePhotos[0]; // alias foto pertama, utk kompatibilitas cek lama (!it.scalePhoto)
+    it.scalePhoto=it.scalePhotos[0];
+    markOrderDirty(orderId); // ada perubahan belum tersimpan → lindungi dari snapshot // alias foto pertama, utk kompatibilitas cek lama (!it.scalePhoto)
     // UPDATE DITARGETKAN: hanya wrapper galeri milik item ini (di SEMUA
     // konteks modal yang ada), TIDAK membangun ulang seluruh modal
     // (menghindari reset field lain yg sedang diketik admin tapi belum disimpan).
     const adaWrap=_refreshAllScaleWraps(orderId, idx, it.scalePhotos);
     if(!adaWrap) _refreshItemPhotoModal(orderId); // fallback kalau wrapper tak ditemukan
-    toast('📸 Foto timbangan ditambahkan ('+it.scalePhotos.length+') — klik "Simpan" untuk menyimpan ke server','ok');
+    // Peringatan DINI (tidak memblokir di sini — pemblokiran sesungguhnya ada
+    // di saveOrder/saveInvoice) supaya admin sadar SAAT ITU JUGA kalau foto
+    // yang ditambahkan membuat order ini berisiko ditolak server saat disimpan,
+    // bukan menunggu sampai selesai isi form invoice lalu baru terblokir.
+    const cekDini=cekUkuranDokumenOrder(o, stripFotoDuplikatUtkSimpan(o.items));
+    if(cekDini){
+      toast('📸 Foto ditambahkan ('+it.scalePhotos.length+') — ⚠️ TAPI order ini sudah melebihi batas ukuran server, akan DITOLAK kalau langsung disimpan. Hapus 1-2 foto dulu.','err');
+    }else{
+      toast('📸 Foto timbangan ditambahkan ('+it.scalePhotos.length+') — klik "Simpan" untuk menyimpan ke server','ok');
+    }
   }catch(e){ toast('Gagal memproses foto: '+e.message,'err'); }
   input.value='';
 }
@@ -6754,6 +6990,7 @@ function removeScalePhotoAt(orderId, idx, photoIdx, ctx){
   it.scalePhotos=photos;
   it.scalePhoto=photos[0]||null;
   if(!photos.length) delete it.scalePhoto;
+  markOrderDirty(orderId); // PENTING: penghapusan juga wajib dilindungi
   const adaWrap=_refreshAllScaleWraps(orderId, idx, photos);
   if(!adaWrap) _refreshItemPhotoModal(orderId);
   toast('Foto timbangan dihapus — klik "Simpan" untuk menyimpan perubahan','err');
@@ -7274,7 +7511,7 @@ async function renderRekap(){
       // Kelengkapan foto & berat — sinyal cepat utk pengawasan, tanpa memuat gambar
       nItemsTotal++;
       if(!it.photo) nMissingCustPhoto++;
-      if(!it.scalePhoto) nMissingScalePhoto++;
+      if(scalePhotosOf(it).length===0) nMissingScalePhoto++; // KOREKSI: baca via scalePhotosOf(), bukan alias langsung (lihat catatan cekUkuranDokumenOrder)
       const declared=it.qty||0, actual=it.actQty!=null?it.actQty:it.qty;
       if(declared>0 && Math.abs(actual-declared)/declared>=0.15) nWeightDiff++;
     });
