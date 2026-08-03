@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v51 · anti data-kembali & kunci sesi otomatis · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v53 · perbaiki hapus bukti TF di Invoice (tidak kembali lagi) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -929,6 +929,7 @@ function pesanKunci(){
   try{ sessionStorage.removeItem('mmb_lock_reason'); }catch(e){}
   if(r==='idle') return '🔒 Sesi dikunci otomatis karena tidak ada aktivitas 30 menit. Masukkan password lagi.';
   if(r==='umur') return '🔒 Sesi sudah 12 jam. Demi keamanan, masuk lagi dengan password.';
+  if(r==='sesi_lama_tak_berjejak') return '🔒 Demi keamanan, masukkan password untuk melanjutkan sesi ini.';
   if(r==='manual') return '✅ Kamu sudah keluar. Masuk lagi untuk melanjutkan.';
   return '';
 }
@@ -1217,7 +1218,27 @@ auth.onAuthStateChanged(async user=>{
     // walaupun Firebase masih menyimpan kredensialnya secara lokal.
     const alasanKadaluwarsa=sesiKadaluwarsa();
     if(alasanKadaluwarsa && alasanKadaluwarsa!=='baru'){ kunciSesi(alasanKadaluwarsa); return; }
-    if(alasanKadaluwarsa==='baru') sesiMulaiBaru(); // sesi lama tak berjejak → mulai hitung dari sekarang
+    if(alasanKadaluwarsa==='baru'){
+      // KOREKSI CELAH KEAMANAN SERIUS: sebelumnya SETIAP kondisi "tidak ada
+      // penanda sesi" langsung dipercaya begitu saja & dianggap sesi baru yg
+      // sah — termasuk sesi Firebase LAMA yang sudah login sejak SEBELUM
+      // kebijakan sesi ini ada. Firebase menyimpan kredensial itu SELAMANYA
+      // (tidak pernah kedaluwarsa sendiri), jadi begitu perbaikan sesi ini
+      // pertama kali dimuat di perangkat dgn sesi lama semacam itu, admin
+      // LANGSUNG masuk tanpa diminta password sama sekali — persis celah
+      // "klik link, tidak diminta email & password" yang dilaporkan.
+      // Sekarang "tidak ada penanda" HANYA dipercaya kalau memang berasal
+      // dari login yang BARU SAJA terjadi (ditandai EKSPLISIT & SINKRON oleh
+      // doLogin() saat tombol ditekan, BUKAN ditebak dari urutan waktu antar
+      // callback async yang bisa meleset). Selain itu → wajib login ulang.
+      if(window._loginBaruEksplisit){
+        sesiMulaiBaru();
+        window._loginBaruEksplisit=false;
+      }else{
+        kunciSesi('sesi_lama_tak_berjejak');
+        return;
+      }
+    }
     sesiCatatAktivitas();
     currentUid=user.uid;
     try{ clearTimeout(window._loginSlow); }catch(e){}
@@ -1239,6 +1260,7 @@ auth.onAuthStateChanged(async user=>{
     document.getElementById('role-label').textContent=currentRole.charAt(0).toUpperCase()+currentRole.slice(1);
     buildTabs();
     loadData();
+    periksaPendingEditsTertinggal(); // beri tahu kalau ada sisa perubahan tak terkonfirmasi dari sesi sebelumnya
     loadSettings().then(()=>{
       var active=(document.querySelector('.page.active')||{}).id||'';
       if(active==='page-orders'&&typeof filterOrders==='function') filterOrders();
@@ -1287,6 +1309,11 @@ function doLogin(){
   const btn=document.getElementById('login-btn');
   errEl.textContent='';
   if(!email||!pass){errEl.textContent='Isi email dan password';return;}
+  // Ditandai SINKRON, SEBELUM permintaan sign-in async dikirim — supaya
+  // onAuthStateChanged (yg bisa saja tembak lebih dulu drpd .then() di bawah)
+  // tetap PASTI melihat penanda ini sebagai bukti "ini benar-benar login baru
+  // yang admin lakukan sendiri", bukan sesi lama yang kebetulan diam-diam pulih.
+  window._loginBaruEksplisit=true;
   try{ localStorage.setItem('mmb_last_email',email); }catch(e){}
   btn.textContent='Masuk...';btn.disabled=true;
   // Kalau lebih dari 3 detik belum masuk, beri tahu (biasanya sinyal lemah).
@@ -1295,6 +1322,7 @@ function doLogin(){
   auth.signInWithEmailAndPassword(email,pass).then(function(){
     sesiMulaiBaru(); // hitungan idle & umur sesi dimulai dari login ini
   }).catch(e=>{
+    window._loginBaruEksplisit=false; // gagal login → jangan tinggalkan penanda menggantung
     clearTimeout(window._loginSlow);
     let msg='Login gagal';
     if(['auth/wrong-password','auth/invalid-credential','auth/invalid-login-credentials'].includes(e.code)) msg='Email atau password salah';
@@ -1829,6 +1857,36 @@ async function saveDropPoints(){
 
 // ── LOAD DATA ─────────────────────────────────
 // ══════════════════════════════════════════════════
+// 🧹 PEMBERSIH NILAI undefined SEBELUM DIKIRIM KE FIRESTORE
+// KOREKSI CELAH SERIUS: Firestore MENOLAK SELURUH PENULISAN kalau ADA SATU
+// SAJA field bernilai `undefined` di mana pun dalam payload (termasuk di
+// dalam array items) — ini perilaku Firestore yang keras dan terdokumentasi,
+// TAPI simulasi pengujian (mock) tidak pernah bisa mendeteksinya karena stub
+// pengujian selalu "berhasil" tanpa validasi seketat server sungguhan.
+// Kalau ada field seperti itu (mis. hasil spread objek yang punya properti
+// opsional yg kebetulan undefined), PENULISAN GAGAL TOTAL — bukan cuma
+// field itu yang gagal, TAPI SELURUH DOKUMEN tidak berubah sama sekali.
+// Inilah salah satu cara paling mungkin admin merasa "sudah disimpan" (toast
+// sukses tampil krn optimistik) tapi nyatanya server menolak diam-diam.
+// Sekarang setiap payload dibersihkan dulu: undefined → dihapus (utk objek)
+// atau diganti null (utk elemen array, supaya struktur/panjang array tetap
+// sama persis, tidak menggeser index item lain).
+// ══════════════════════════════════════════════════
+function bersihkanUndefinedUtkFirestore(val){
+  if(val===undefined) return null;
+  if(val===null || typeof val!=='object') return val;
+  if(Array.isArray(val)) return val.map(bersihkanUndefinedUtkFirestore);
+  if(val instanceof Date) return val;
+  const out={};
+  Object.keys(val).forEach(k=>{
+    const v=val[k];
+    if(v===undefined) return; // hapus key-nya, jangan disimpan sbg undefined
+    out[k]=bersihkanUndefinedUtkFirestore(v);
+  });
+  return out;
+}
+
+// ══════════════════════════════════════════════════
 // 📝 PELACAK PERUBAHAN BELUM TERSIMPAN (anti "data kembali lagi")
 // KOREKSI BUG SERIUS: penjaga versi lama menebak niat admin dari JUMLAH foto —
 // "kalau lokal punya LEBIH BANYAK foto drpd server, pertahankan lokal".
@@ -1843,23 +1901,55 @@ async function saveDropPoints(){
 // Sekarang tidak menebak lagi: order yang sedang punya perubahan BELUM
 // TERSIMPAN ditandai eksplisit, dan selama tanda itu ada, snapshot TIDAK BOLEH
 // menimpa item-nya — baik penambahan MAUPUN penghapusan sama-sama aman.
-const _localPendingEdits={};
+//
+// KOREKSI TAMBAHAN (penting): tanda ini SEKARANG disimpan ke localStorage,
+// bukan cuma variabel di memori. Sebelumnya kalau admin MENUTUP APLIKASI
+// (bukan cuma tab) SEBELUM penulisan ke server benar-benar terkonfirmasi —
+// mis. penulisan gagal krn undefined seperti di atas, atau sekadar koneksi
+// lambat — tanda "belum tersimpan" itu IKUT HILANG saat aplikasi dibuka lagi
+// (karena cuma variabel JS yg direset), sehingga PERLINDUNGANNYA LENYAP TEPAT
+// SAAT PALING DIBUTUHKAN: waktu admin "buka lagi utk mengecek". Sekarang
+// bertahan lintas sesi, dan kalau ternyata masih ada tanda tersisa dari sesi
+// SEBELUMNYA, admin diberi tahu secara eksplisit alih-alih dibiarkan mengira
+// semua baik-baik saja.
+// ══════════════════════════════════════════════════
+const PENDING_EDIT_KEY='mmb_pending_edits';
 const PENDING_EDIT_TTL=15*60*1000; // pengaman: tanda kedaluwarsa 15 menit
+function _bacaPendingEditsDariStorage(){
+  try{ return JSON.parse(localStorage.getItem(PENDING_EDIT_KEY)||'{}')||{}; }catch(e){ return {}; }
+}
+function _tulisPendingEditsKeStorage(obj){
+  try{ localStorage.setItem(PENDING_EDIT_KEY, JSON.stringify(obj)); }catch(e){}
+}
+const _localPendingEdits=_bacaPendingEditsDariStorage();
 function markOrderDirty(orderId){
   if(!orderId) return;
   _localPendingEdits[orderId]={ts:Date.now()};
+  _tulisPendingEditsKeStorage(_localPendingEdits);
 }
 function clearOrderDirty(orderId){
   if(!orderId) return;
   delete _localPendingEdits[orderId];
+  _tulisPendingEditsKeStorage(_localPendingEdits);
 }
 function isOrderDirty(orderId){
   const d=_localPendingEdits[orderId];
   if(!d) return false;
   // Jangan biarkan tanda menggantung selamanya (mis. admin tinggal pergi
   // tanpa simpan/batal) — kalau kedaluwarsa, biarkan server jadi acuan lagi.
-  if(Date.now()-d.ts>PENDING_EDIT_TTL){ delete _localPendingEdits[orderId]; return false; }
+  if(Date.now()-d.ts>PENDING_EDIT_TTL){ delete _localPendingEdits[orderId]; _tulisPendingEditsKeStorage(_localPendingEdits); return false; }
   return true;
+}
+// Dipanggil sekali saat app dibuka: kalau ada tanda TERSISA dari sesi
+// sebelumnya (bukti penulisan sempat gagal/tak terkonfirmasi sebelum app
+// ditutup), beri tahu admin secara TERANG-TERANGAN — jangan biarkan mereka
+// mengira semuanya sudah tersimpan padahal belum tentu.
+function periksaPendingEditsTertinggal(){
+  const sisa=Object.keys(_localPendingEdits).filter(id=>isOrderDirty(id));
+  if(!sisa.length) return;
+  setTimeout(function(){
+    toast('⚠️ '+sisa.length+' order punya perubahan yang belum terkonfirmasi tersimpan dari sesi sebelumnya (kode: '+sisa.join(', ')+'). Buka & cek lagi datanya untuk memastikan.','err');
+  }, 1500);
 }
 // Batal / tutup tanpa simpan → buang tanda DAN ambil ulang data asli dari
 // server, supaya layar tidak menyisakan perubahan yang tidak jadi disimpan.
@@ -1885,6 +1975,10 @@ function batalEditInvoice(){
   const id=editOrderId;
   closeModal('modal-invoice');
   if(id) discardOrderEdits(id);
+  // Buang juga staging bukti TF yg belum disimpan, supaya kalau invoice
+  // dibuka lagi utk order yg SAMA, staged diisi ULANG dari data server
+  // (bukan melanjutkan penghapusan/penambahan yg batal disimpan).
+  _payProofsStaged=[]; _payProofsStagedForOrderId=null;
 }
 function loadData(){
   // Real-time listener untuk orders
@@ -2260,7 +2354,25 @@ function openOrderModal(id){
   // SAMA yang baru saja ditambahkan fotonya di Invoice — foto yang belum
   // sempat disimpan jadi hilang diam-diam (terasa spt "foto baru menggantikan
   // yang lama"). Sekarang HANYA direset kalau benar-benar pindah ke order lain.
-  if(_payProofsStagedForOrderId!==id){ _payProofsStaged=[]; _payProofsStagedForOrderId=id; }
+  if(_payProofsStagedForOrderId!==id){
+    // KOREKSI BUG SERIUS (bukti TF terhapus "kembali" setelah disimpan):
+    // sebelumnya baris ini mengosongkan _payProofsStaged jadi [] — padahal
+    // begitu order ini SUDAH punya bukti TF tersimpan sebelumnya, tampilan
+    // galeri jatuh ke FALLBACK paymentProofsOf(existing) (bukan dari staged
+    // yg kosong itu). Akibatnya kalau admin menghapus salah satu foto lewat
+    // payProofRemoveAt(), yang difilter adalah _payProofsStaged yg MEMANG
+    // SUDAH KOSONG dari awal — hasilnya tetap [] tak peduli index mana yg
+    // "dihapus". Saat "Simpan" ditekan, proofs jatuh LAGI ke fallback
+    // paymentProofsOf(existing) — yaitu foto ASLI SEBELUM dihapus, LENGKAP —
+    // sehingga foto yang admin hapus muncul kembali seolah tak pernah dihapus.
+    // Sekarang staged diisi LEBIH DULU dengan data yg SUDAH tersimpan, supaya
+    // baik tambah maupun hapus sama-sama beroperasi pada data yang benar
+    // sejak awal — bukan pada array kosong yang keliru dikira "representasi
+    // lengkap" oleh kode penyimpan.
+    const _existingP=orderPayment(id);
+    _payProofsStaged=paymentProofsOf(_existingP).slice();
+    _payProofsStagedForOrderId=id;
+  }
   const ST=[
     {k:'pending',l:'📝 Pesanan Masuk'},
     {k:'approved',l:'✅ Order Disetujui Admin'},
@@ -2766,7 +2878,7 @@ function commitAddInvoiceItem(orderId){
   document.getElementById('add-invoice-item-picker').innerHTML='';
   openInvoiceModal(orderId); // re-render supaya barang baru langsung terlihat
   toast('✅ Barang baru ditambahkan ke Invoice','ok');
-  db.collection('orders').doc(orderId).update({items, totalFinal:o.totalFinal, totalFinalOverride:false}).then(function(){ clearOrderDirty(orderId); }).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({items, totalFinal:o.totalFinal, totalFinalOverride:false})).then(function(){ clearOrderDirty(orderId); }).catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 function addAdminItem(orderId){
   if(!guard('additem-'+orderId,600)) return;
@@ -2775,7 +2887,7 @@ function addAdminItem(orderId){
   items.push({cat:'Tambahan Admin',type:'kg',qty:1,rate:0,actQty:1,actRate:0,desc:'',status:'approved',adminPriced:true,adminByAdmin:true,adminNote:'Ditambahkan admin saat handling'});
   o.items=items;
   markOrderDirty(orderId);
-  db.collection('orders').doc(orderId).update({items}).then(function(){
+  db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({items})).then(function(){
     clearOrderDirty(orderId);
     openOrderModal(orderId); // re-render modal supaya field baru muncul
     toast('Barang baru ditambahkan — isi detail lalu Simpan','ok');
@@ -2817,7 +2929,7 @@ function setItemSt(orderId,i,status){
   }
   var _slot=refreshCapacityUI(o.tripId);
   toast((status==='approved'?'Barang disetujui ✅':'Barang ditolak ❌')+(_slot?(' · '+_slot):''), status==='approved'?'ok':'err');
-  db.collection('orders').doc(orderId).update({items, totalFinal:o.totalFinal, totalFinalOverride:false, invoiceItems:o.invoiceItems||[]}).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({items, totalFinal:o.totalFinal, totalFinalOverride:false, invoiceItems:o.invoiceItems||[]})).catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 
 async function saveOrder(id){
@@ -2882,7 +2994,7 @@ async function saveOrder(id){
   // Ke SERVER kirim versi TERPANGKAS (tanpa duplikat alias foto); cache lokal
   // (o.items, sudah di-assign di atas) tetap memakai versi lengkap agar
   // perilaku dalam-memori tidak berubah sama sekali.
-  db.collection('orders').doc(id).update({...payload, items:itemsUtkSimpan})
+  db.collection('orders').doc(id).update(bersihkanUndefinedUtkFirestore({...payload, items:itemsUtkSimpan}))
     .then(function(){ clearOrderDirty(id); })  // sudah aman di server → snapshot boleh jadi acuan lagi
     .catch(function(e){ markOrderDirty(id); toast('❌ GAGAL SIMPAN: '+e.message+' — perubahan masih tersimpan di layar, coba simpan lagi','err'); });
 }
@@ -3036,7 +3148,25 @@ function openInvoiceModal(id){
   // TF sama sekali — kalau admin sempat membuka Invoice utk order lain lalu
   // kembali ke Invoice order ini, foto lama dari order LAIN bisa ikut
   // ter-staging di sini secara keliru. Sekarang direset kalau order berbeda.
-  if(_payProofsStagedForOrderId!==id){ _payProofsStaged=[]; _payProofsStagedForOrderId=id; }
+  if(_payProofsStagedForOrderId!==id){
+    // KOREKSI BUG SERIUS (bukti TF terhapus "kembali" setelah disimpan):
+    // sebelumnya baris ini mengosongkan _payProofsStaged jadi [] — padahal
+    // begitu order ini SUDAH punya bukti TF tersimpan sebelumnya, tampilan
+    // galeri jatuh ke FALLBACK paymentProofsOf(existing) (bukan dari staged
+    // yg kosong itu). Akibatnya kalau admin menghapus salah satu foto lewat
+    // payProofRemoveAt(), yang difilter adalah _payProofsStaged yg MEMANG
+    // SUDAH KOSONG dari awal — hasilnya tetap [] tak peduli index mana yg
+    // "dihapus". Saat "Simpan" ditekan, proofs jatuh LAGI ke fallback
+    // paymentProofsOf(existing) — yaitu foto ASLI SEBELUM dihapus, LENGKAP —
+    // sehingga foto yang admin hapus muncul kembali seolah tak pernah dihapus.
+    // Sekarang staged diisi LEBIH DULU dengan data yg SUDAH tersimpan, supaya
+    // baik tambah maupun hapus sama-sama beroperasi pada data yang benar
+    // sejak awal — bukan pada array kosong yang keliru dikira "representasi
+    // lengkap" oleh kode penyimpan.
+    const _existingP=orderPayment(id);
+    _payProofsStaged=paymentProofsOf(_existingP).slice();
+    _payProofsStagedForOrderId=id;
+  }
   const visibleItems=(o.items||[]).filter(it=>it.status!=='rejected'&&it.status!=='cancel_requested');
   const nCustomer=visibleItems.filter(it=>!it.adminByAdmin).length;
   const nAdmin=visibleItems.filter(it=>it.adminByAdmin).length;
@@ -3207,7 +3337,7 @@ async function saveInvoice(){
   refreshCapacityUI(o.tripId);
   // Ke SERVER kirim versi TERPANGKAS (tanpa duplikat alias foto); cache lokal
   // (o.items di atas) tetap memakai versi lengkap.
-  db.collection('orders').doc(o.id).update({
+  db.collection('orders').doc(o.id).update(bersihkanUndefinedUtkFirestore({
     items:itemsUtkSimpan,
     invoiceItems:invItems,
     cukaiAmount:cukai,totalFinal:total,
@@ -3217,7 +3347,7 @@ async function saveInvoice(){
     revenueOverrideAt:isOverride?Date.now():null,
     invoiceDate:new Date().toISOString().slice(0,10),
     invoiceNote:document.getElementById('iv-note')?.value||'',
-  }).then(function(){ clearOrderDirty(o.id); })  // aman di server → snapshot boleh jadi acuan lagi
+  })).then(function(){ clearOrderDirty(o.id); })  // aman di server → snapshot boleh jadi acuan lagi
     .catch(function(e){ markOrderDirty(o.id); toast('❌ GAGAL SIMPAN INVOICE: '+e.message+' — perubahan masih di layar, coba simpan lagi','err'); });
   const lines=invItems.map(it=>`• ${it.cat} (${it.qty} ${it.type}): ${fmtRp(it.qty*it.rate)}`).join('\n');
   // ── INVOICE PENAGIHAN — dokumen TAGIHAN, bukan bukti lunas ──
@@ -3334,7 +3464,26 @@ let cachedPayments=[], _payProofsStaged=[], _payProofsStagedForOrderId=null;
 function setupPaymentsListener(){
   try{
     db.collection('payments').onSnapshot(snap=>{
-      cachedPayments = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      // KOREKSI: listener ini SEBELUMNYA mengganti cachedPayments TOTAL tanpa
+      // perlindungan apa pun — kerentanan IDENTIK dengan yang pernah terjadi
+      // di koleksi orders (lihat catatan lengkap di isOrderDirty/markOrderDirty).
+      // Kalau admin menghapus foto bukti TF (deletePaymentProof) dan snapshot
+      // masuk SEBELUM tulisan itu terkonfirmasi server, foto yg baru dihapus
+      // bisa "kembali" krn tertimpa data lama. Sekarang order yg sedang
+      // ditandai "belum tersimpan" (isOrderDirty, dipakai bersama dgn koleksi
+      // orders krn payments doc id = orderId) dipertahankan versi lokalnya.
+      const prevPById={}; (cachedPayments||[]).forEach(p=>{ prevPById[p.id]=p; });
+      const freshList=snap.docs.map(d=>({id:d.id, ...d.data()}));
+      const freshIds=new Set(freshList.map(p=>p.id));
+      const hasil=freshList.map(fresh=>{
+        if(isOrderDirty(fresh.id) && prevPById[fresh.id]) return prevPById[fresh.id];
+        return fresh;
+      });
+      // Dokumen yg DIHAPUS di server (mis. deletePayment) tapi versi lokalnya
+      // sedang dilindungi (jarang, tapi konsisten dgn prinsip yg sama) — tidak
+      // perlu ditambahkan balik; hasil dari freshList sudah cukup krn delete
+      // payment tidak memakai jalur staging ini.
+      cachedPayments = hasil;
       if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function'){ renderPembukuan(); }
       if(document.getElementById('page-orders') && document.getElementById('page-orders').classList.contains('active') && typeof filterOrders==='function'){ filterOrders(); }
     }, e=>console.warn('Payments:',e));
@@ -3418,9 +3567,13 @@ function paymentSectionHTML(o){
   const diffInit = !amt ? '<span style="color:var(--muted)">Masukkan nominal yang diterima…</span>'
     : Math.abs(_diffAmt)<1 ? '<span style="color:#4CAF7D;font-weight:700">✅ Sesuai tagihan (Rp'+tagihan.toLocaleString('id-ID')+')</span>'
     : '<span style="color:#E8924A;font-weight:800">⚠️ '+(_diffAmt>0?'Lebih':'Kurang')+' Rp'+Math.abs(_diffAmt).toLocaleString('id-ID')+'</span> <span style="color:var(--muted)">vs tagihan Rp'+tagihan.toLocaleString('id-ID')+'</span>';
-  // Kalau ada foto yg baru saja di-stage (belum simpan), tampilkan itu dulu;
-  // kalau tidak, tampilkan foto yg SUDAH tersimpan dari payment existing.
-  const proofsToShow = (_payProofsStaged&&_payProofsStaged.length) ? _payProofsStaged : paymentProofsOf(p);
+  // KOREKSI: _payProofsStaged SEKARANG SELALU sumber kebenaran tunggal —
+  // sudah diisi dari data tersimpan begitu modal dibuka (lihat komentar di
+  // titik reset _payProofsStagedForOrderId). TIDAK BOLEH ada fallback ke
+  // paymentProofsOf(p) di sini lagi: kalau admin sengaja menghapus SEMUA
+  // foto (staged jadi panjang 0), fallback lama akan SALAH mengembalikan
+  // foto lama seolah tak pernah dihapus — persis bug yang dilaporkan.
+  const proofsToShow = _payProofsStaged||[];
   const proofBox = proofsToShow.length ? paymentProofGalleryHTML(proofsToShow) : payProofUploadLabel();
   return `
   <div class="divider"></div>
@@ -3475,7 +3628,11 @@ async function savePayment(orderId){
   const dateStr=((document.getElementById('pay-date')||{}).value||'').trim();
   const note=((document.getElementById('pay-note')||{}).value||'').trim();
   const existing=orderPayment(orderId);
-  const proofs=(_payProofsStaged&&_payProofsStaged.length) ? _payProofsStaged : paymentProofsOf(existing);
+  // KOREKSI: sama seperti proofsToShow di atas — _payProofsStaged SELALU
+  // sumber kebenaran tunggal begitu modal dibuka. Fallback ke
+  // paymentProofsOf(existing) DIBUANG karena itulah yang membuat foto yang
+  // sengaja dihapus admin tersimpan lagi seolah tak pernah dihapus.
+  const proofs=_payProofsStaged||[];
   if(amount<=0){ toast('Isi nominal yang diterima dulu','err'); return; }
   if(!proofs.length){ toast('Upload minimal 1 foto bukti TF dulu','err'); return; }
   const trip=(cachedTrips||[]).find(t=>t.id===o.tripId);
@@ -3494,10 +3651,12 @@ async function savePayment(orderId){
   toast('💰 Pembayaran & '+proofs.length+' foto bukti TF tersimpan — otomatis masuk pembukuan owner ✅'+(completePayload?' · Order otomatis Selesai ✅':''),'ok');
   if(typeof filterOrders==='function') filterOrders();
   if(document.getElementById('page-pembukuan') && document.getElementById('page-pembukuan').classList.contains('active') && typeof renderPembukuan==='function') renderPembukuan();
+  markOrderDirty(orderId); // lindungi selama jeda simpan asinkron
   try{
-    await db.collection('payments').doc(orderId).set(payload);
-    await db.collection('orders').doc(orderId).update({payStatus:'lunas', ...(completePayload||{})});
-  }catch(e){ toast('Gagal simpan ke server: '+e.message,'err'); }
+    await db.collection('payments').doc(orderId).set(bersihkanUndefinedUtkFirestore(payload));
+    await db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({payStatus:'lunas', ...(completePayload||{})}));
+    clearOrderDirty(orderId);
+  }catch(e){ markOrderDirty(orderId); toast('❌ GAGAL SIMPAN KE SERVER: '+e.message+' — perubahan masih di layar, coba simpan lagi','err'); }
 }
 async function deletePayment(orderId){
   if(!guard('delpay-'+orderId,700)) return;
@@ -5547,9 +5706,12 @@ function deletePaymentProof(orderId, idx){
   if(!confirm('Hapus foto bukti TF ke-'+(idx+1)+' dari '+proofs.length+'? Tindakan ini tidak bisa dibatalkan.')) return;
   const newProofs=proofs.filter((_,i)=>i!==idx);
   p.proofs=newProofs; p.proof=newProofs[0]||null;
+  markOrderDirty(orderId); // lindungi dari snapshot payments yg bisa menimpa balik
   renderPembukuan();
   toast('🗑 Foto bukti TF ke-'+(idx+1)+' dihapus','err');
-  db.collection('payments').doc(orderId).update({proofs:newProofs, proof:newProofs[0]||null}).catch(function(e){ toast('Gagal hapus di server: '+e.message,'err'); });
+  db.collection('payments').doc(orderId).update(bersihkanUndefinedUtkFirestore({proofs:newProofs, proof:newProofs[0]||null}))
+    .then(function(){ clearOrderDirty(orderId); })
+    .catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL HAPUS DI SERVER: '+e.message+' — coba lagi','err'); });
 }
 function togglePembTripDetail(key){
   if(_pembExpandedTrips.has(key)) _pembExpandedTrips.delete(key);
