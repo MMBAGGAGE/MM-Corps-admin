@@ -306,7 +306,7 @@ button,a,select,input,label,[onclick],.tab,.ocard,.btn,.btn-block,.btn-gold,.btn
   <!-- TRIPS -->
   <div id="page-trips" class="page">
     <div class="sec-ttl">Jadwal Trip <button class="btn btn-gold" style="font-size:10px;padding:5px 10px" onclick="openTripModal()">+ Baru</button></div>
-    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v53 · perbaiki hapus bukti TF di Invoice (tidak kembali lagi) · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
+    <div id="build-stamp" style="font-size:9px;color:var(--muted);margin:-6px 0 8px;letter-spacing:.5px">slot-sync v54 · semua 5 jalur penulisan items kini terlindungi penuh · laporan analisis profesional · terjemahkan kode kategori jadi nama</div>
     <div id="trips-list"></div>
   </div>
 
@@ -2510,10 +2510,18 @@ function deleteAdminItem(orderId, idx){
   // Invoice), pakai helper context-aware yg sama dgn galeri foto.
   _refreshItemPhotoModal(orderId);
   toast('🗑️ Barang "'+(removed.cat||'')+'" dihapus'+(_slot?(' · '+_slot):''),'err');
-  db.collection('orders').doc(orderId).update({
-    items:o.items, totalFinal:o.totalFinal, totalFinalOverride:false,
+  // KOREKSI CELAH: fungsi ini menulis SELURUH array items (bukan cuma barang
+  // yg dihapus) — kalau barang LAIN di order ini baru saja ditambah/dihapus
+  // fotonya tapi belum terkonfirmasi server, penulisan di sini bisa memicu
+  // race condition yg sama persis dgn yg pernah dibongkar utk scalePhotos.
+  // Disamakan penuh dgn perlindungan yg sudah dipasang di titik lain.
+  markOrderDirty(orderId);
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(o.items);
+  db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({
+    items:itemsUtkSimpan, totalFinal:o.totalFinal, totalFinalOverride:false,
     invoiceItems:o.invoiceItems||[]
-  }).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  })).then(function(){ clearOrderDirty(orderId); })
+    .catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 // === #3 FLEKSIBEL: admin tambah barang baru yang dikirim tapi tak didaftarkan customer ===
 // ── TAMBAH JENIS BARANG DI INVOICE (Aktualisasi) ──
@@ -2561,9 +2569,14 @@ function commitChangeItemCategory(orderId, idx){
   const wrap=document.getElementById('change-cat-picker-'+idx); if(wrap) wrap.innerHTML='';
   _refreshItemPhotoModal(orderId);
   toast('🏷️ Kategori diubah: "'+oldName+'" → "'+cat.label+'"','ok');
-  db.collection('orders').doc(orderId).update({
-    items:o.items, totalFinal:o.totalFinal, totalFinalOverride:false, invoiceItems:o.invoiceItems||[]
-  }).catch(function(e){ toast('Gagal simpan: '+e.message,'err'); });
+  // KOREKSI CELAH: sama seperti deleteAdminItem — fungsi ini MENULIS ULANG
+  // seluruh array items, jadi wajib perlindungan yg sama.
+  markOrderDirty(orderId);
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(o.items);
+  db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({
+    items:itemsUtkSimpan, totalFinal:o.totalFinal, totalFinalOverride:false, invoiceItems:o.invoiceItems||[]
+  })).then(function(){ clearOrderDirty(orderId); })
+    .catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 // ══════════════════════════════════════════════════
 // 🔧 PERBAIKAN MASSAL KATEGORI — mengatasi data lama dgn nama kategori
@@ -2779,13 +2792,19 @@ function applyBulkCategoryFix(){
     n++;
   });
   if(!n){ toast('Belum ada barang yang dipilih kategorinya','err'); return; }
+  // KOREKSI CELAH: operasi massal ini menulis items ke BANYAK order sekaligus
+  // TANPA satu pun perlindungan (bahkan .catch()-nya kosong, menelan
+  // kegagalan diam-diam). Disamakan penuh dgn titik penulisan lain.
   Object.values(perOrder).forEach(o=>{
     try{ recalcTotalFinal(o); }catch(e){}
-    db.collection('orders').doc(o.id).update({
-      items:o.items,
+    markOrderDirty(o.id);
+    const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(o.items);
+    db.collection('orders').doc(o.id).update(bersihkanUndefinedUtkFirestore({
+      items:itemsUtkSimpan,
       totalFinal:(o.totalFinal!=null?o.totalFinal:null),
       invoiceItems:o.invoiceItems||[]
-    }).catch(function(){});
+    })).then(function(){ clearOrderDirty(o.id); })
+      .catch(function(e){ markOrderDirty(o.id); toast('❌ Gagal simpan order '+(o.code||o.id)+': '+e.message,'err'); });
   });
   tutupKlasifikasi();
   toast('✅ '+n+' barang diklasifikasikan ke kategori resmi','ok');
@@ -2892,7 +2911,7 @@ function addAdminItem(orderId){
     openOrderModal(orderId); // re-render modal supaya field baru muncul
     toast('Barang baru ditambahkan — isi detail lalu Simpan','ok');
     refreshCapacityUI(o.tripId);
-  }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
+  }).catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 function setItemSt(orderId,i,status){
   const o=cachedOrders.find(x=>x.id===orderId);if(!o)return;
@@ -3013,16 +3032,21 @@ async function approveOrder(id){
     const trip = cachedTrips.find(tt => tt.id === o.tripId);
     if(trip && trip.waGroupLink) waLink = trip.waGroupLink;
   }
-  const upd = {status:'approved',items,history,totalFinal:o.totalFinal,totalFinalOverride:false,invoiceItems:o.invoiceItems||[]};
+  // KOREKSI CELAH: items di sini membawa SELURUH foto yg mungkin sudah
+  // ter-stage (timbangan/dest) — wajib perlindungan yg sama spt titik lain.
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(items);
+  const upd = {status:'approved',items:itemsUtkSimpan,history,totalFinal:o.totalFinal,totalFinalOverride:false,invoiceItems:o.invoiceItems||[]};
   if(waLink) upd.waGroupLink = waLink;
-  // OPTIMISTIC: update cache + UI instan
+  // OPTIMISTIC: update cache + UI instan (cache LOKAL tetap pakai versi lengkap)
   o.status='approved'; o.items=items; if(waLink) o.waGroupLink=waLink;
+  markOrderDirty(id);
   closeModal('modal-order');
   var _slot=refreshCapacityUI(o.tripId);
   toast('Order disetujui ✅ Link grup WA masuk ke tracking'+(_slot?(' · '+_slot):''),'ok');
-  db.collection('orders').doc(id).update(upd).then(function(){
+  db.collection('orders').doc(id).update(bersihkanUndefinedUtkFirestore(upd)).then(function(){
+    clearOrderDirty(id);
     sendWA(id,'approved');
-  }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
+  }).catch(function(e){ markOrderDirty(id); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 
 function cancelOrder(id){
@@ -3031,20 +3055,25 @@ function cancelOrder(id){
   const o=cachedOrders.find(x=>x.id===id);if(!o)return;
   const reason=prompt('Alasan penolakan (opsional, akan dilihat customer):')||'';
   const items=(o.items||[]).map(it=>({...it,status:'rejected',adminNote:it.adminNote||reason||'Order ditolak admin'}));
+  // KOREKSI CELAH: sama seperti approveOrder — items di sini bisa membawa
+  // foto yg belum sempat dipangkas duplikatnya.
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(items);
   const upd={
     status:'cancelled',
-    items,
+    items:itemsUtkSimpan,
     statusNote:reason?('Alasan: '+reason):'Order ditolak/dibatalkan admin',
     history:[...(o.history||[]),{status:'cancelled',ts:Date.now(),note:reason||'Order ditolak admin'}]
   };
   // OPTIMISTIC: close modal + toast instantly, save in background
   o.status='cancelled'; o.items=items;
+  markOrderDirty(id);
   closeModal('modal-order');
   var _slot=refreshCapacityUI(o.tripId);
   toast('Order dibatalkan ❌'+(_slot?(' · '+_slot):''),'err');
-  db.collection('orders').doc(id).update(upd).then(function(){
+  db.collection('orders').doc(id).update(bersihkanUndefinedUtkFirestore(upd)).then(function(){
+    clearOrderDirty(id);
     if(typeof sendWA==='function') sendWA(id,'cancelled');
-  }).catch(function(e){ toast('Gagal: '+e.message,'err'); });
+  }).catch(function(e){ markOrderDirty(id); toast('❌ GAGAL SIMPAN: '+e.message,'err'); });
 }
 
 async function deleteOrder(id){
@@ -5769,6 +5798,17 @@ function togglePembScalePhotos(orderId, idx){
 // klik "Simpan" terpisah): Pembukuan BUKAN halaman edit, tidak ada tombol
 // Simpan sendiri — jadi hapus dari sini harus LANGSUNG tersimpan ke server.
 function deleteScalePhotoFromPembukuan(orderId, idx, photoIdx){
+  // KOREKSI CELAH SERIUS: fungsi ini adalah JALUR KETIGA utk menghapus foto
+  // timbangan (selain dari Kelola & Invoice) — tapi SEBELUMNYA TIDAK PUNYA
+  // SATU PUN perlindungan yang sudah dipasang di removeScalePhotoAt: tidak
+  // markOrderDirty (rentan snapshot orders menimpa balik penghapusan sebelum
+  // sempat terkonfirmasi server — persis mekanisme yg pernah dibongkar utk
+  // bug serupa), tidak ada pembersih undefined (Firestore bisa menolak
+  // SELURUH tulisan diam-diam), dan items dikirim APA ADANYA tanpa memangkas
+  // duplikat alias foto (boros ukuran dokumen tanpa perlu). Kalau admin
+  // menghapus foto timbangan lewat halaman Pembukuan, TEPAT bug yang
+  // dilaporkan bisa terjadi persis di sini. Sekarang disamakan penuh dengan
+  // removeScalePhotoAt.
   const o=(cachedOrders||[]).find(x=>x.id===orderId); if(!o) return;
   const it=(o.items||[])[idx]; if(!it) return;
   const photos=scalePhotosOf(it);
@@ -5776,9 +5816,13 @@ function deleteScalePhotoFromPembukuan(orderId, idx, photoIdx){
   const newPhotos=photos.filter((_,pi)=>pi!==photoIdx);
   it.scalePhotos=newPhotos; it.scalePhoto=newPhotos[0]||null;
   if(!newPhotos.length) delete it.scalePhoto;
+  markOrderDirty(orderId); // lindungi dari snapshot orders selama jeda simpan asinkron
   renderPembukuan();
   toast('🗑 Foto timbangan dihapus','err');
-  db.collection('orders').doc(orderId).update({items:o.items}).catch(function(e){ toast('Gagal simpan ke server: '+e.message,'err'); });
+  const itemsUtkSimpan=stripFotoDuplikatUtkSimpan(o.items);
+  db.collection('orders').doc(orderId).update(bersihkanUndefinedUtkFirestore({items:itemsUtkSimpan}))
+    .then(function(){ clearOrderDirty(orderId); })
+    .catch(function(e){ markOrderDirty(orderId); toast('❌ GAGAL HAPUS DI SERVER: '+e.message+' — coba lagi','err'); });
 }
 function renderPembukuan(){
   const el=document.getElementById('pembukuan-result');
